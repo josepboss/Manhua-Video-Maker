@@ -11,3 +11,5 @@ openai
 azure-cognitiveservices-speech
 python-dotenv
 aiofiles
+beautifulsoup4
+lxml
