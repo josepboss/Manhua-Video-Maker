@@ -95,6 +95,7 @@
       <button onclick="switchTab('settings')" id="tab-settings" class="tab-active pb-3 text-sm font-semibold transition-colors">Settings</button>
       <button onclick="switchTab('generate')" id="tab-generate" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Generate</button>
       <button onclick="switchTab('history')" id="tab-history" class="tab-inactive pb-3 text-sm font-semibold transition-colors">History</button>
+      <button onclick="switchTab('scraper')" id="tab-scraper" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Scraper</button>
     </div>
 
     <!-- Settings Tab -->
@@ -249,6 +250,10 @@
 
     <!-- Generate Tab -->
     <div id="panel-generate" class="hidden space-y-6">
+      <div id="scraped-banner" class="hidden card p-4 flex items-center justify-between gap-4" style="border-color:#22c55e">
+        <p id="scraper-status-generate" class="text-sm text-green-400 font-medium"></p>
+        <button onclick="document.getElementById('scraped-banner').classList.add('hidden')" class="text-slate-500 hover:text-slate-300 text-xs">Dismiss</button>
+      </div>
       <div class="card p-6 space-y-4">
         <div>
           <label class="label" for="story_context">Story Context <span class="text-slate-500 font-normal">(optional but recommended)</span></label>
@@ -373,6 +378,46 @@
       </div>
       <div id="history-list" class="space-y-3">
         <p class="text-slate-500 text-sm">No history yet.</p>
+      </div>
+    </div>
+
+    <!-- Scraper Tab -->
+    <div id="panel-scraper" class="hidden space-y-6">
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">Manhua Scraper</h2>
+        <p class="text-sm text-slate-400">Paste a chapter URL to automatically download all page images, then send them straight to the video generator.</p>
+        <div>
+          <label class="label">Chapter URL</label>
+          <input type="text" id="scraper_url" placeholder="https://olympustaff.com/manga/title/chapter-1" class="input-field" />
+        </div>
+        <div>
+          <label class="label">Image CSS Selector <span class="text-slate-500 font-normal">(optional — leave blank for auto-detect)</span></label>
+          <input type="text" id="scraper_selector" placeholder=".reading-content img, .chapter-content img" class="input-field" />
+        </div>
+        <div class="flex items-center gap-4">
+          <button onclick="scrapeChapter()" id="scrape-btn" class="btn-primary">Fetch Chapter Images</button>
+          <p id="scraper-status" class="text-sm text-slate-400"></p>
+        </div>
+        <div id="scraper-preview" class="hidden pt-3 border-t border-slate-700 space-y-3">
+          <p id="scraper-count" class="text-sm text-green-400 font-medium"></p>
+          <button onclick="sendScrapedToGenerate()" class="btn-secondary flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+            Send to Generate &amp; Start Pipeline
+          </button>
+        </div>
+      </div>
+
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">Known Sites</h2>
+        <p class="text-sm text-slate-400">Save site names and base URLs for quick reference. These are for your notes only — paste the full chapter URL above.</p>
+        <div id="sites-list" class="space-y-2"></div>
+        <div class="flex gap-2">
+          <input type="text" id="new-site-name" placeholder="Site name e.g. OlympusStaff" class="input-field" style="flex:1" />
+          <input type="text" id="new-site-url" placeholder="Base URL e.g. https://olympustaff.com" class="input-field" style="flex:2" />
+          <button onclick="addSite()" class="btn-secondary whitespace-nowrap">Add</button>
+        </div>
       </div>
     </div>
   </div>
@@ -766,8 +811,142 @@
       }
     }
 
+    // Scraper
+    async function scrapeChapter() {
+      const url = document.getElementById('scraper_url').value.trim();
+      const selector = document.getElementById('scraper_selector').value.trim();
+      if (!url) return;
+
+      const btn = document.getElementById('scrape-btn');
+      btn.disabled = true;
+      btn.textContent = 'Fetching...';
+      document.getElementById('scraper-status').textContent = 'Downloading chapter images...';
+      document.getElementById('scraper-preview').classList.add('hidden');
+
+      try {
+        const res = await fetch('/api/scraper/fetch', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url, selector})
+        });
+        const data = await res.json();
+
+        if (data.success) {
+          document.getElementById('scraper-status').textContent = '';
+          document.getElementById('scraper-count').textContent =
+            `Found ${data.image_count} images — ready to generate`;
+          document.getElementById('scraper-preview').classList.remove('hidden');
+          window.scrapedJobId = data.job_id;
+        } else {
+          document.getElementById('scraper-status').textContent = '❌ ' + data.error;
+          document.getElementById('scraper-status').className = 'text-sm text-red-400';
+        }
+      } catch(e) {
+        document.getElementById('scraper-status').textContent = '❌ ' + e.message;
+        document.getElementById('scraper-status').className = 'text-sm text-red-400';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Fetch Chapter Images';
+      }
+    }
+
+    async function sendScrapedToGenerate() {
+      const jobId = window.scrapedJobId;
+      if (!jobId) return;
+
+      switchTab('generate');
+      currentJobId = jobId;
+
+      const storyContext = document.getElementById('story_context').value;
+      document.getElementById('scraped-banner').classList.remove('hidden');
+      document.getElementById('scraper-status-generate').textContent =
+        'Scraped chapter loaded — starting pipeline...';
+      document.getElementById('progress-section').classList.remove('hidden');
+      document.getElementById('error-box').classList.add('hidden');
+      document.getElementById('complete-section').classList.add('hidden');
+      resetSteps();
+
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = true;
+      btn.textContent = 'Processing...';
+
+      try {
+        const res = await fetch(`/api/process/${jobId}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({story_context: storyContext})
+        });
+        if (!res.ok) throw new Error(await res.text());
+        startPolling(jobId);
+        saveToHistory(jobId, 'processing');
+        document.getElementById('scraper-status-generate').textContent =
+          'Scraped chapter — pipeline running';
+      } catch(e) {
+        document.getElementById('scraper-status-generate').textContent = '❌ ' + e.message;
+        btn.disabled = false;
+        btn.textContent = 'Generate Video';
+      }
+    }
+
+    async function loadScraperSites() {
+      try {
+        const res = await fetch('/api/settings');
+        const s = await res.json();
+        const sites = s.known_scraper_sites || [];
+        const container = document.getElementById('sites-list');
+        if (!sites.length) {
+          container.innerHTML = '<p class="text-sm text-slate-500">No sites saved yet.</p>';
+          return;
+        }
+        container.innerHTML = sites.map((s, i) => `
+          <div class="flex items-center justify-between py-2 border-b border-slate-700">
+            <span class="text-sm"><span class="text-slate-200 font-medium">${s.name}</span>
+              <span class="text-slate-500 ml-2">${s.url}</span></span>
+            <button onclick="removeSite(${i})" class="text-xs text-slate-500 hover:text-red-400">Remove</button>
+          </div>
+        `).join('');
+      } catch(e) {
+        console.error('Failed to load scraper sites:', e);
+      }
+    }
+
+    async function addSite() {
+      const name = document.getElementById('new-site-name').value.trim();
+      const url = document.getElementById('new-site-url').value.trim();
+      if (!name || !url) return;
+
+      const res = await fetch('/api/settings');
+      const settings = await res.json();
+      const sites = settings.known_scraper_sites || [];
+      sites.push({name, url});
+
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...settings, known_scraper_sites: sites})
+      });
+
+      document.getElementById('new-site-name').value = '';
+      document.getElementById('new-site-url').value = '';
+      loadScraperSites();
+    }
+
+    async function removeSite(index) {
+      const res = await fetch('/api/settings');
+      const settings = await res.json();
+      const sites = settings.known_scraper_sites || [];
+      sites.splice(index, 1);
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({...settings, known_scraper_sites: sites})
+      });
+      loadScraperSites();
+    }
+
     // Init
     loadSettings();
+    loadScraperSites();
   </script>
 </body>
 </html>
