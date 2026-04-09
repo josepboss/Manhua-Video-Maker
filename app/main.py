@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, save_settings
+from app import buffer_api
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -197,6 +198,42 @@ async def api_debug_job(job_id: str):
     else:
         return {"error": f"No panels directory found for job {job_id}", "ocr_results": []}
     return {"job_id": job_id, "panel_count": len(ocr_results), "ocr_results": ocr_results}
+
+
+@app.post("/api/buffer/test")
+async def test_buffer(body: dict):
+    token = body.get("access_token", "")
+    if not token:
+        return {"success": False, "error": "No access token provided"}
+    return buffer_api.test_connection(token)
+
+
+@app.get("/api/buffer/profiles")
+async def get_buffer_profiles():
+    settings = get_settings()
+    token = settings.get("buffer_access_token", "")
+    if not token:
+        return {"success": False, "error": "Buffer not configured"}
+    profiles = buffer_api.get_profiles(token)
+    return {"success": True, "profiles": profiles}
+
+
+@app.post("/api/buffer/send/{job_id}")
+async def send_to_buffer(job_id: str, body: dict):
+    settings = get_settings()
+    token = settings.get("buffer_access_token", "")
+    profile_id = settings.get("buffer_profile_id", "")
+    schedule = settings.get("buffer_schedule", "queue")
+    caption = body.get("caption", "")
+
+    if not token or not profile_id:
+        return {"success": False, "error": "Buffer access token and profile ID required in Settings"}
+
+    video_path = OUTPUT_DIR / job_id / "final.mp4"
+    if not video_path.exists():
+        return {"success": False, "error": "Video file not found"}
+
+    return buffer_api.send_video_to_buffer(token, profile_id, str(video_path), caption, schedule)
 
 
 @app.get("/api/jobs")
