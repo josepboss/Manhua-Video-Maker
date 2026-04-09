@@ -17,7 +17,12 @@ DEFAULT_SETTINGS = {
     "video_format": "landscape",
     "watermark_text": "ManhuaRecap",
     "ocr_language": "en",
-    "narration_language": "English"
+    "narration_language": "English",
+    "known_scraper_sites": [
+        {"name": "OlympusStaff", "url": "https://olympustaff.com"},
+        {"name": "MangaReader", "url": "https://mangareader.to"},
+        {"name": "TCBScans", "url": "https://tcbscans.me"}
+    ]
 }
 
 
