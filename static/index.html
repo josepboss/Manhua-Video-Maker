@@ -104,7 +104,28 @@
         </div>
         <div>
           <label class="label">OpenRouter Model</label>
-          <input type="text" id="openrouter_model" placeholder="openai/gpt-4o-mini" class="input-field" />
+          <select id="openrouter_model" class="input-field">
+            <optgroup label="⚡ Best Value">
+              <option value="google/gemini-2.0-flash-lite-001">Gemini 2.0 Flash Lite — cheapest, vision support</option>
+              <option value="google/gemini-flash-1.5">Gemini 1.5 Flash — fast, good narrative</option>
+              <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B — ultra cheap, no vision</option>
+            </optgroup>
+            <optgroup label="🎯 Balanced">
+              <option value="openai/gpt-4o-mini" selected>GPT-4o Mini — proven, vision support</option>
+              <option value="google/gemini-2.0-flash-001">Gemini 2.0 Flash — stronger narrative</option>
+              <option value="mistralai/mistral-small">Mistral Small — good for non-English</option>
+            </optgroup>
+            <optgroup label="🏆 Best Quality">
+              <option value="openai/gpt-4o">GPT-4o — best narrative, expensive</option>
+              <option value="google/gemini-2.0-pro-exp">Gemini 2.0 Pro — best for Arabic/multilingual</option>
+              <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku — excellent storytelling</option>
+            </optgroup>
+            <optgroup label="💰 Ultra Cheap">
+              <option value="deepseek/deepseek-v3">DeepSeek V3 — cheap input, higher output cost</option>
+              <option value="microsoft/phi-3-mini-128k-instruct">Phi-3 Mini — very cheap, basic quality</option>
+            </optgroup>
+          </select>
+          <p id="model-vision-badge" class="text-sm mt-1 text-gray-400"></p>
         </div>
       </div>
 
@@ -337,6 +358,26 @@
       if (tab === 'history') renderHistory();
     }
 
+    // Vision-capable model badge
+    const visionModels = [
+      "openai/gpt-4o-mini",
+      "openai/gpt-4o",
+      "google/gemini-2.0-flash-lite-001",
+      "google/gemini-2.0-flash-lite",
+      "google/gemini-flash-1.5",
+      "google/gemini-2.0-flash-001",
+      "google/gemini-2.0-pro-exp",
+      "anthropic/claude-3.5-haiku"
+    ];
+    document.getElementById('openrouter_model').addEventListener('change', function() {
+      const hasVision = visionModels.includes(this.value);
+      const badge = document.getElementById('model-vision-badge');
+      badge.textContent = hasVision
+        ? '✅ Vision supported — empty panels will use image fallback'
+        : '⚠️ No vision — empty panels will be skipped';
+      badge.className = 'text-sm mt-1 ' + (hasVision ? 'text-green-400' : 'text-yellow-400');
+    });
+
     // TTS provider toggle
     function onTTSChange() {
       const provider = document.querySelector('input[name="tts_provider"]:checked')?.value;
@@ -351,7 +392,9 @@
         const res = await fetch('/api/settings');
         const s = await res.json();
         document.getElementById('openrouter_api_key').value = s.openrouter_api_key || '';
-        document.getElementById('openrouter_model').value = s.openrouter_model || 'openai/gpt-4o-mini';
+        const modelSel = document.getElementById('openrouter_model');
+        modelSel.value = s.openrouter_model || 'openai/gpt-4o-mini';
+        modelSel.dispatchEvent(new Event('change'));
         document.getElementById('openai_tts_key').value = s.openai_tts_key || '';
         document.getElementById('openai_tts_voice').value = s.openai_tts_voice || 'onyx';
         document.getElementById('elevenlabs_api_key').value = s.elevenlabs_api_key || '';

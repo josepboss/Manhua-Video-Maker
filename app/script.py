@@ -25,6 +25,17 @@ VISION_PROMPT = (
     "This is a manhua panel. Describe what is happening in one third-person narrative sentence."
 )
 
+VISION_CAPABLE_MODELS = {
+    "openai/gpt-4o-mini",
+    "openai/gpt-4o",
+    "google/gemini-2.0-flash-lite-001",
+    "google/gemini-2.0-flash-lite",
+    "google/gemini-flash-1.5",
+    "google/gemini-2.0-flash-001",
+    "google/gemini-2.0-pro-exp",
+    "anthropic/claude-3.5-haiku",
+}
+
 
 def call_openrouter(system: str, user: str, api_key: str, model: str) -> Tuple[str, int]:
     headers = {
@@ -131,16 +142,19 @@ def generate_script(
 
     for i, (image_path, text) in enumerate(panels):
         if not text or not text.strip():
-            logger.info(f"Panel {i} has no OCR text — using vision fallback")
-            try:
-                narration, tokens = call_openrouter_vision(image_path, api_key, model)
-                total_tokens += tokens
-                if narration:
-                    context.update_context(narration[:300])
-                    narrations.append(narration)
-                    logger.info(f"Vision fallback panel {i}: '{narration[:80]}'")
-            except Exception as e:
-                logger.warning(f"Vision fallback failed for panel {i}: {e}")
+            if model in VISION_CAPABLE_MODELS:
+                logger.info(f"Panel {i} has no OCR text — using vision fallback")
+                try:
+                    narration, tokens = call_openrouter_vision(image_path, api_key, model)
+                    total_tokens += tokens
+                    if narration:
+                        context.update_context(narration[:300])
+                        narrations.append(narration)
+                        logger.info(f"Vision fallback panel {i}: '{narration[:80]}'")
+                except Exception as e:
+                    logger.warning(f"Vision fallback failed for panel {i}: {e}")
+            else:
+                logger.info(f"Skipping panel {i} — no OCR text and model has no vision")
         else:
             narration, tokens = generate_panel_narration(text, api_key, model)
             total_tokens += tokens
