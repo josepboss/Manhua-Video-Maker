@@ -20,23 +20,45 @@ VISION_CAPABLE_MODELS = {
 
 
 def get_narrator_prompt(language: str = "English", story_context: str = "") -> str:
-    context_block = f"\n\nStory context provided by user:\n{story_context}" if story_context else ""
+    if language == "Arabic":
+        context_block = f"\n\nسياق القصة المقدم من المستخدم:\n{story_context}" if story_context else ""
+        return (
+            f"أنت راوٍ محترف لمقاطع ملخصات المانهوا على يوتيوب.{context_block}\n\n"
+            f"مهمتك: تحويل الحوارات والنصوص المستخرجة من لوحات المانهوا إلى سرد قصصي درامي بضمير الغائب.\n"
+            f"القواعد الصارمة:\n"
+            f"- لا تحتفظ بصيغة الحوار أبداً\n"
+            f"- لا تستخدم علامات الاقتباس\n"
+            f"- استخدم أسماء الشخصيات من السياق المقدم بدلاً من 'الرجل' أو 'المرأة'\n"
+            f"- اكتب جملاً قصيرة للمشاهد الحركية وجملاً أطول للشرح\n"
+            f"- اجعل الأسلوب درامياً وشيقاً يناسب جمهور يوتيوب\n"
+            f"- اكتب بالعربية الفصحى المبسطة فقط\n"
+        )
+
+    context_block = f"\n\nStory context:\n{story_context}" if story_context else ""
     return (
         f"You are a narrator for manhua recap videos.{context_block}\n\n"
-        f"Use the character names from the story context instead of generic terms like 'the man' or 'the woman'. "
-        f"Convert raw dialogue and text into third-person narrative storytelling in {language}. "
-        f"Never keep dialogue format. Never use quotes. Merge lines into coherent flowing sentences. "
-        f"Remove filler words and repetition. Be concise but dramatic. Always write in third person. "
+        f"Convert raw dialogue into third-person narrative storytelling in {language}. "
+        f"Never keep dialogue format. Never use quotes. "
+        f"Use character names from context instead of 'the man' or 'the woman'. "
+        f"Be concise but dramatic. Always write in third person. "
         f"Your entire response must be in {language} only."
     )
 
 
 def get_merge_prompt(language: str = "English") -> str:
+    if language == "Arabic":
+        return (
+            "أنت محرر نصوص محترف متخصص في سكريبتات يوتيوب العربية. "
+            "خذ سرديات اللوحات المقدمة ودمجها في سكريبت واحد متدفق ومتماسك. "
+            "استخدم جملاً قصيرة للمشاهد الحركية وجملاً أطول للشرح والوصف. "
+            "الهدف: 700-1700 كلمة تناسب فيديو مدته 5-12 دقيقة. "
+            "اكتب بالعربية الفصحى المبسطة فقط. لا تضف عناوين أو تسميات."
+        )
     return (
-        f"You are an expert video script editor. Merge the panel narrations into one "
-        f"continuous polished script in {language}. Add pacing: short sentences for action, "
-        f"longer for exposition. Target 700-1700 words. Return only the final script in "
-        f"{language}, no headings or labels."
+        f"You are an expert video script editor. Merge panel narrations into one "
+        f"continuous polished script in {language}. Short sentences for action, "
+        f"longer for exposition. Target 700-1700 words. "
+        f"Return only the final script, no headings or labels."
     )
 
 
