@@ -3,8 +3,10 @@ import re
 import uuid
 import json
 import shutil
+import signal
 import logging
 import asyncio
+import psutil
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +32,7 @@ for d in [UPLOADS_DIR, PANELS_DIR, AUDIO_DIR, OUTPUT_DIR, JOBS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 cancelled_jobs: set = set()
+ffmpeg_processes: dict = {}
 
 
 def is_cancelled(job_id: str) -> bool:
@@ -244,6 +247,21 @@ async def scraper_fetch(body: dict):
 @app.post("/api/cancel/{job_id}")
 async def cancel_job(job_id: str):
     cancelled_jobs.add(job_id)
+    if job_id in ffmpeg_processes:
+        proc = ffmpeg_processes[job_id]
+        try:
+            parent = psutil.Process(proc.pid)
+            for child in parent.children(recursive=True):
+                try:
+                    child.kill()
+                except psutil.NoSuchProcess:
+                    pass
+            parent.kill()
+        except (psutil.NoSuchProcess, ProcessLookupError):
+            pass
+        except Exception as e:
+            logger.warning(f"FFmpeg kill error for {job_id}: {e}")
+        ffmpeg_processes.pop(job_id, None)
     try:
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
     except Exception:
@@ -271,6 +289,7 @@ async def run_pipeline(job_id: str):
             pass
     finally:
         cancelled_jobs.discard(job_id)
+        ffmpeg_processes.pop(job_id, None)
 
 
 def _run_pipeline_sync(job_id: str):
@@ -398,7 +417,8 @@ def _run_pipeline_sync(job_id: str):
         video_output,
         job_id,
         settings,
-        progress_callback=video_progress
+        progress_callback=video_progress,
+        process_registry=ffmpeg_processes
     )
 
     # ── Final stats ───────────────────────────────────────────────────────────
