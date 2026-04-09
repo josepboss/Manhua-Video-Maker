@@ -29,6 +29,12 @@ JOBS_DIR = BASE_DIR / "jobs"
 for d in [UPLOADS_DIR, PANELS_DIR, AUDIO_DIR, OUTPUT_DIR, JOBS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+cancelled_jobs: set = set()
+
+
+def is_cancelled(job_id: str) -> bool:
+    return job_id in cancelled_jobs
+
 app = FastAPI(title="ManhuaRecap")
 
 app.add_middleware(
@@ -235,6 +241,16 @@ async def scraper_fetch(body: dict):
     return result
 
 
+@app.post("/api/cancel/{job_id}")
+async def cancel_job(job_id: str):
+    cancelled_jobs.add(job_id)
+    try:
+        update_job(job_id, status="cancelled", current_step="Cancelled by user")
+    except Exception:
+        pass
+    return {"success": True}
+
+
 @app.get("/api/jobs")
 async def api_list_jobs():
     jobs = []
@@ -253,6 +269,8 @@ async def run_pipeline(job_id: str):
             update_job(job_id, status="failed", error_message=str(e))
         except Exception:
             pass
+    finally:
+        cancelled_jobs.discard(job_id)
 
 
 def _run_pipeline_sync(job_id: str):
@@ -292,6 +310,10 @@ def _run_pipeline_sync(job_id: str):
     update_job_stats(job_id, panels_count=len(panel_paths))
     progress(25, f"Detected {len(panel_paths)} panels. Extracting text...")
 
+    if is_cancelled(job_id):
+        update_job(job_id, status="cancelled", current_step="Cancelled by user")
+        return
+
     ocr_lang = settings.get("ocr_language", "en")
     narration_lang = settings.get("narration_language", "English")
 
@@ -305,6 +327,10 @@ def _run_pipeline_sync(job_id: str):
         if i % 5 == 0:
             pct = 25 + int((i / len(panel_paths)) * 15)
             progress(pct, f"OCR: {i+1}/{len(panel_paths)} panels...")
+
+    if is_cancelled(job_id):
+        update_job(job_id, status="cancelled", current_step="Cancelled by user")
+        return
 
     # ── Stage 3: Script generation ────────────────────────────────────────────
     progress(40, "Writing narration script...")
@@ -334,6 +360,10 @@ def _run_pipeline_sync(job_id: str):
     llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
     update_job_stats(job_id, tokens_used=total_tokens, llm_cost=llm_cost)
 
+    if is_cancelled(job_id):
+        update_job(job_id, status="cancelled", current_step="Cancelled by user")
+        return
+
     # ── Stage 4: TTS ──────────────────────────────────────────────────────────
     progress(80, "Generating audio narration...")
 
@@ -343,6 +373,10 @@ def _run_pipeline_sync(job_id: str):
     )
 
     update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
+
+    if is_cancelled(job_id):
+        update_job(job_id, status="cancelled", current_step="Cancelled by user")
+        return
 
     # ── Stage 5: Video assembly ───────────────────────────────────────────────
     progress(85, "Assembling video...")
