@@ -20,6 +20,7 @@ def extract_text(image_path: str) -> str:
         ocr = get_ocr()
         result = ocr.ocr(image_path, cls=True)
         if not result or not result[0]:
+            logger.info(f"Panel OCR raw result: '' (no result) [{image_path}]")
             return ""
 
         lines = []
@@ -29,11 +30,12 @@ def extract_text(image_path: str) -> str:
                 if text_info and len(text_info) >= 2:
                     text = text_info[0]
                     confidence = text_info[1]
-                    if confidence > 0.5 and len(text.strip()) > 1:
+                    if confidence > 0.3 and len(text.strip()) > 1:
                         lines.append(text.strip())
 
         raw = " ".join(lines)
         cleaned = clean_text(raw)
+        logger.info(f"Panel OCR raw result: '{cleaned[:100]}' [{Path(image_path).name}]")
         return cleaned
     except Exception as e:
         logger.error(f"OCR failed for {image_path}: {e}")

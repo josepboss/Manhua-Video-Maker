@@ -1,0 +1,43 @@
+{
+  "job_id": "0415e21b-2a17-42fd-8cfd-586dbf06068f",
+  "status": "failed",
+  "progress": 80,
+  "current_step": "Narrating panel 39/39...",
+  "error_message": "No narrations generated \u2014 check OCR output and API key",
+  "created_at": "2026-04-09T17:37:01.980207",
+  "upload_paths": [
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/01.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/25.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/14.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/20.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/11.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/22.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/23.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/16.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/12.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/17.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/18.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/19.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/13.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/15.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/10.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/09.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/02.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/06.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/03.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/07.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/21.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/08.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/05.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/04.png",
+    "/home/runner/workspace/app/uploads/0415e21b-2a17-42fd-8cfd-586dbf06068f/24.png"
+  ],
+  "stats": {
+    "panels_count": 39,
+    "tokens_used": 0,
+    "tts_chars": 0,
+    "estimated_cost": 0.0,
+    "llm_cost": 0.0,
+    "tts_cost": 0.0
+  }
+}

@@ -175,6 +175,21 @@ async def api_download_srt(job_id: str):
     )
 
 
+@app.get("/api/debug/{job_id}")
+async def api_debug_job(job_id: str):
+    from app.ocr import extract_text
+    panels_dir = PANELS_DIR / job_id
+    ocr_results = []
+    if panels_dir.exists():
+        for fname in sorted(panels_dir.iterdir()):
+            if fname.suffix.lower() == ".png":
+                text = extract_text(str(fname))
+                ocr_results.append({"panel": fname.name, "text": text or "(empty)"})
+    else:
+        return {"error": f"No panels directory found for job {job_id}", "ocr_results": []}
+    return {"job_id": job_id, "panel_count": len(ocr_results), "ocr_results": ocr_results}
+
+
 @app.get("/api/jobs")
 async def api_list_jobs():
     jobs = []

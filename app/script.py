@@ -1,3 +1,4 @@
+import base64
 import requests
 import logging
 import re
@@ -18,6 +19,10 @@ MERGE_SYSTEM = (
     "them into one continuous, polished script. Add pacing: use short punchy sentences for "
     "action scenes and longer sentences for exposition. Target 700-1700 words (5-12 minutes "
     "read time). Return only the final script text, no headings or labels."
+)
+
+VISION_PROMPT = (
+    "This is a manhua panel. Describe what is happening in one third-person narrative sentence."
 )
 
 
@@ -41,6 +46,46 @@ def call_openrouter(system: str, user: str, api_key: str, model: str) -> Tuple[s
         json=payload,
         headers=headers,
         timeout=60
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    text = data["choices"][0]["message"]["content"].strip()
+    tokens = data.get("usage", {}).get("total_tokens", len(text.split()) * 2)
+    return text, tokens
+
+
+def call_openrouter_vision(image_path: str, api_key: str) -> Tuple[str, int]:
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://manhuarecap.local",
+        "X-Title": "ManhuaRecap"
+    }
+    payload = {
+        "model": "openai/gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": NARRATOR_SYSTEM},
+            {"role": "user", "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{b64}"}
+                },
+                {
+                    "type": "text",
+                    "text": VISION_PROMPT
+                }
+            ]}
+        ],
+        "max_tokens": 800
+    }
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        json=payload,
+        headers=headers,
+        timeout=90
     )
     resp.raise_for_status()
     data = resp.json()
@@ -86,16 +131,21 @@ def generate_script(
 
     for i, (image_path, text) in enumerate(panels):
         if not text or not text.strip():
-            logger.info(f"Skipping blank panel {i}: no OCR text")
-            if progress_callback:
-                pct = int((i + 1) / total_panels * 40)
-                progress_callback(pct, f"Narrating panel {i+1}/{total_panels}...")
-            continue
-
-        narration, tokens = generate_panel_narration(text, api_key, model)
-        total_tokens += tokens
-        if narration:
-            narrations.append(narration)
+            logger.info(f"Panel {i} has no OCR text — using vision fallback")
+            try:
+                narration, tokens = call_openrouter_vision(image_path, api_key)
+                total_tokens += tokens
+                if narration:
+                    context.update_context(narration[:300])
+                    narrations.append(narration)
+                    logger.info(f"Vision fallback panel {i}: '{narration[:80]}'")
+            except Exception as e:
+                logger.warning(f"Vision fallback failed for panel {i}: {e}")
+        else:
+            narration, tokens = generate_panel_narration(text, api_key, model)
+            total_tokens += tokens
+            if narration:
+                narrations.append(narration)
 
         if progress_callback:
             pct = int((i + 1) / total_panels * 40)
@@ -115,7 +165,6 @@ def generate_script(
         final_script = combined
 
     srt_content = generate_srt(final_script)
-
     estimated_llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
 
     stats = {
