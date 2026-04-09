@@ -77,7 +77,14 @@ def update_job_stats(job_id: str, **stat_fields) -> None:
 async def serve_index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
-        return FileResponse(str(index_path))
+        return FileResponse(
+            str(index_path),
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
     return JSONResponse({"error": "index.html not found"}, status_code=404)
 
 
