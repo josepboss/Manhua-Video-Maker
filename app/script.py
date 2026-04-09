@@ -7,10 +7,6 @@ from app import context
 
 logger = logging.getLogger(__name__)
 
-VISION_PROMPT = (
-    "This is a manhua panel. Describe what is happening in one third-person narrative sentence."
-)
-
 VISION_CAPABLE_MODELS = {
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
@@ -23,12 +19,14 @@ VISION_CAPABLE_MODELS = {
 }
 
 
-def get_narrator_prompt(language: str = "English") -> str:
+def get_narrator_prompt(language: str = "English", story_context: str = "") -> str:
+    context_block = f"\n\nStory context provided by user:\n{story_context}" if story_context else ""
     return (
-        f"You are a narrator for manhua recap videos. Convert raw dialogue and text into "
-        f"third-person narrative storytelling in {language}. Never keep dialogue format. "
-        f"Never use quotes. Merge lines into coherent flowing sentences. Remove filler words "
-        f"and repetition. Be concise but dramatic. Always write in third person. "
+        f"You are a narrator for manhua recap videos.{context_block}\n\n"
+        f"Use the character names from the story context instead of generic terms like 'the man' or 'the woman'. "
+        f"Convert raw dialogue and text into third-person narrative storytelling in {language}. "
+        f"Never keep dialogue format. Never use quotes. Merge lines into coherent flowing sentences. "
+        f"Remove filler words and repetition. Be concise but dramatic. Always write in third person. "
         f"Your entire response must be in {language} only."
     )
 
@@ -70,9 +68,15 @@ def call_openrouter(system: str, user: str, api_key: str, model: str) -> Tuple[s
     return text, tokens
 
 
-def call_openrouter_vision(image_path: str, api_key: str, model: str) -> Tuple[str, int]:
+def call_openrouter_vision(image_path: str, api_key: str, model: str, story_context: str = "", language: str = "English") -> Tuple[str, int]:
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
+
+    context_prefix = f"Story context: {story_context}\n\n" if story_context else ""
+    vision_user_prompt = (
+        f"{context_prefix}This is a manhua panel. Describe what is happening "
+        f"using the correct character names in one third-person narrative sentence in {language}."
+    )
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -83,7 +87,7 @@ def call_openrouter_vision(image_path: str, api_key: str, model: str) -> Tuple[s
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": get_narrator_prompt()},
+            {"role": "system", "content": get_narrator_prompt(language, story_context)},
             {"role": "user", "content": [
                 {
                     "type": "image_url",
@@ -91,7 +95,7 @@ def call_openrouter_vision(image_path: str, api_key: str, model: str) -> Tuple[s
                 },
                 {
                     "type": "text",
-                    "text": VISION_PROMPT
+                    "text": vision_user_prompt
                 }
             ]}
         ],
@@ -142,6 +146,7 @@ def generate_script(
     model: str,
     narration_language: str = "English",
     ocr_lang: str = "en",
+    story_context: str = "",
     progress_callback=None
 ) -> Tuple[str, str, dict]:
     context.reset_context()
@@ -149,7 +154,7 @@ def generate_script(
     total_tokens = 0
     total_panels = len(panels)
 
-    narrator_system = get_narrator_prompt(narration_language)
+    narrator_system = get_narrator_prompt(narration_language, story_context)
     merge_system = get_merge_prompt(narration_language)
 
     use_arabic_strategy = (ocr_lang == "ar" and model in VISION_CAPABLE_MODELS)
@@ -160,7 +165,7 @@ def generate_script(
             # Arabic: vision is primary, OCR text is fallback
             narration, tokens = "", 0
             try:
-                narration, tokens = call_openrouter_vision(image_path, api_key, model)
+                narration, tokens = call_openrouter_vision(image_path, api_key, model, story_context, narration_language)
                 logger.info(f"Arabic vision panel {i}: '{narration[:80]}'")
             except Exception as e:
                 logger.warning(f"Arabic vision failed for panel {i}: {e}")
@@ -180,7 +185,7 @@ def generate_script(
             elif model in VISION_CAPABLE_MODELS:
                 logger.info(f"Panel {i} has no OCR text — using vision fallback")
                 try:
-                    narration, tokens = call_openrouter_vision(image_path, api_key, model)
+                    narration, tokens = call_openrouter_vision(image_path, api_key, model, story_context, narration_language)
                     logger.info(f"Vision fallback panel {i}: '{narration[:80]}'")
                 except Exception as e:
                     logger.warning(f"Vision fallback failed for panel {i}: {e}")
