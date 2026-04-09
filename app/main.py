@@ -139,11 +139,12 @@ async def api_upload(files: list[UploadFile] = File(...)):
 
 
 @app.post("/api/process/{job_id}")
-async def api_process(job_id: str, background_tasks: BackgroundTasks):
+async def api_process(job_id: str, background_tasks: BackgroundTasks, body: dict = None):
     job = read_job(job_id)
     if job["status"] not in ["queued", "failed"]:
         raise HTTPException(status_code=400, detail="Job already processing or complete")
-    update_job(job_id, status="processing", progress=5, current_step="Starting pipeline...")
+    story_context = (body or {}).get("story_context", "")
+    update_job(job_id, status="processing", progress=5, current_step="Starting pipeline...", story_context=story_context)
     background_tasks.add_task(run_pipeline, job_id)
     return {"job_id": job_id, "status": "processing"}
 
@@ -278,6 +279,8 @@ def _run_pipeline_sync(job_id: str):
 
     openrouter_model = settings.get("openrouter_model", "openai/gpt-4o-mini")
 
+    story_context = job.get("story_context", "")
+
     def script_progress(pct: int, step: str):
         progress(40 + pct, step)
 
@@ -287,6 +290,7 @@ def _run_pipeline_sync(job_id: str):
         openrouter_model,
         narration_language=narration_lang,
         ocr_lang=ocr_lang,
+        story_context=story_context,
         progress_callback=script_progress
     )
 
