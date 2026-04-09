@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 SETTINGS_PATH = Path(__file__).parent / "settings.json"
@@ -15,8 +14,8 @@ DEFAULT_SETTINGS = {
     "azure_voice_name": "en-US-AndrewNeural",
     "openai_tts_key": "",
     "openai_tts_voice": "onyx",
-    "video_format": "vertical",
-    "channel_watermark": "ManhuaRecap"
+    "video_format": "landscape",
+    "watermark_text": "ManhuaRecap"
 }
 
 

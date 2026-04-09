@@ -2,17 +2,18 @@ import requests
 import logging
 import re
 from typing import List, Tuple
-from app.context import update_context, get_context, reset_context
+from app import context
 
 logger = logging.getLogger(__name__)
 
 NARRATOR_SYSTEM = (
     "You are a narrator for manhua recap videos. Convert raw dialogue and text into "
-    "third-person narrative storytelling. Never keep dialogue format. Merge lines into "
-    "coherent flowing sentences. Remove filler. Be concise but dramatic."
+    "third-person narrative storytelling. Never keep dialogue format. Never use quotes. "
+    "Merge lines into coherent flowing sentences. Remove filler words and repetition. "
+    "Be concise but dramatic. Always write in third person."
 )
 
-FINAL_PASS_SYSTEM = (
+MERGE_SYSTEM = (
     "You are an expert video script editor. Take the panel narrations provided and merge "
     "them into one continuous, polished script. Add pacing: use short punchy sentences for "
     "action scenes and longer sentences for exposition. Target 700-1700 words (5-12 minutes "
@@ -20,7 +21,7 @@ FINAL_PASS_SYSTEM = (
 )
 
 
-def call_openrouter(system: str, user: str, api_key: str, model: str) -> str:
+def call_openrouter(system: str, user: str, api_key: str, model: str) -> Tuple[str, int]:
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -43,29 +44,33 @@ def call_openrouter(system: str, user: str, api_key: str, model: str) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"].strip()
+    text = data["choices"][0]["message"]["content"].strip()
+    tokens = data.get("usage", {}).get("total_tokens", len(text.split()) * 2)
+    return text, tokens
 
 
-def generate_panel_narration(panel_text: str, api_key: str, model: str) -> str:
-    context = get_context()
-    user_prompt = ""
-    if context:
-        user_prompt += context + "\n\n"
-    user_prompt += f"Current panel text:\n{panel_text}"
+def generate_panel_narration(panel_text: str, api_key: str, model: str) -> Tuple[str, int]:
+    context_str = context.get_context()
+    user_prompt = (
+        f"{context_str}\n\n" if context_str else ""
+    ) + (
+        f"Current panel text:\n{panel_text}\n\n"
+        "Write a third-person narrative sentence for this panel only."
+    )
 
     try:
-        result = call_openrouter(NARRATOR_SYSTEM, user_prompt, api_key, model)
-        update_context(result[:300])
-        return result
+        result, tokens = call_openrouter(NARRATOR_SYSTEM, user_prompt, api_key, model)
+        context.update_context(result[:300])
+        return result, tokens
     except Exception as e:
         logger.warning(f"Panel narration failed (retry 1): {e}")
         try:
-            result = call_openrouter(NARRATOR_SYSTEM, user_prompt, api_key, model)
-            update_context(result[:300])
-            return result
+            result, tokens = call_openrouter(NARRATOR_SYSTEM, user_prompt, api_key, model)
+            context.update_context(result[:300])
+            return result, tokens
         except Exception as e2:
             logger.error(f"Panel narration failed (retry 2), skipping: {e2}")
-            return ""
+            return "", 0
 
 
 def generate_script(
@@ -74,7 +79,7 @@ def generate_script(
     model: str,
     progress_callback=None
 ) -> Tuple[str, str, dict]:
-    reset_context()
+    context.reset_context()
     narrations = []
     total_tokens = 0
     total_panels = len(panels)
@@ -82,15 +87,19 @@ def generate_script(
     for i, (image_path, text) in enumerate(panels):
         if not text or not text.strip():
             logger.info(f"Skipping blank panel {i}: no OCR text")
+            if progress_callback:
+                pct = int((i + 1) / total_panels * 40)
+                progress_callback(pct, f"Narrating panel {i+1}/{total_panels}...")
             continue
 
-        narration = generate_panel_narration(text, api_key, model)
+        narration, tokens = generate_panel_narration(text, api_key, model)
+        total_tokens += tokens
         if narration:
             narrations.append(narration)
 
         if progress_callback:
-            progress = int((i + 1) / total_panels * 40)
-            progress_callback(progress, f"Narrating panel {i+1}/{total_panels}...")
+            pct = int((i + 1) / total_panels * 40)
+            progress_callback(pct, f"Narrating panel {i+1}/{total_panels}...")
 
     if not narrations:
         raise ValueError("No narrations generated — check OCR output and API key")
@@ -99,21 +108,20 @@ def generate_script(
     final_user = f"Here are the panel narrations:\n\n{combined}"
 
     try:
-        final_script = call_openrouter(FINAL_PASS_SYSTEM, final_user, api_key, model)
+        final_script, merge_tokens = call_openrouter(MERGE_SYSTEM, final_user, api_key, model)
+        total_tokens += merge_tokens
     except Exception as e:
-        logger.error(f"Final pass failed: {e}")
+        logger.error(f"Merge pass failed: {e}")
         final_script = combined
 
-    estimated_input_tokens = len(combined.split()) * 1.3
-    estimated_output_tokens = len(final_script.split()) * 1.3
-    total_tokens = int(estimated_input_tokens + estimated_output_tokens)
-
     srt_content = generate_srt(final_script)
+
+    estimated_llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
 
     stats = {
         "tokens_used": total_tokens,
         "panels_count": len(narrations),
-        "estimated_llm_cost": round(total_tokens / 1_000_000 * 0.15, 4)
+        "estimated_llm_cost": estimated_llm_cost
     }
 
     return final_script, srt_content, stats

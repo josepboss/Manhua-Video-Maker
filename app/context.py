@@ -1,5 +1,4 @@
 from collections import deque
-from typing import List
 
 MAX_CONTEXT = 5
 
@@ -14,8 +13,8 @@ def get_context() -> str:
     if not _context_buffer:
         return ""
     summaries = list(_context_buffer)
-    lines = [f"- {s}" for s in summaries]
-    return "Recent story context (last panels):\n" + "\n".join(lines)
+    joined = " ".join(f"{s}." if not s.endswith(".") else s for s in summaries)
+    return f"Previous context: {joined}"
 
 
 def reset_context() -> None:

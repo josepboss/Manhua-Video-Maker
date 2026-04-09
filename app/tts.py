@@ -12,107 +12,111 @@ def generate_audio(script: str, job_id: str, settings: dict, audio_dir: str) -> 
     char_count = len(script)
 
     if provider == "elevenlabs":
-        audio_bytes = tts_elevenlabs(script, settings)
+        audio_bytes = generate_elevenlabs_tts(
+            script,
+            settings.get("elevenlabs_api_key", ""),
+            settings.get("elevenlabs_voice_id", "")
+        )
     elif provider == "azure":
-        audio_bytes = tts_azure(script, settings)
+        audio_bytes = generate_azure_tts(
+            script,
+            settings.get("azure_tts_key", ""),
+            settings.get("azure_tts_region", ""),
+            settings.get("azure_voice_name", "en-US-AndrewNeural")
+        )
     else:
-        audio_bytes = tts_openai(script, settings)
+        audio_bytes = generate_openai_tts(
+            script,
+            settings.get("openai_tts_key", ""),
+            settings.get("openai_tts_voice", "onyx")
+        )
 
     with open(output_path, "wb") as f:
         f.write(audio_bytes)
 
     tts_cost = estimate_tts_cost(provider, char_count)
-
     return output_path, char_count, tts_cost
 
 
-def tts_openai(script: str, settings: dict) -> bytes:
-    api_key = settings.get("openai_tts_key", "")
+def generate_openai_tts(text: str, api_key: str, voice: str = "onyx") -> bytes:
     if not api_key:
         raise ValueError("OpenAI TTS API key not configured")
-    voice = settings.get("openai_tts_voice", "onyx")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "tts-1",
-        "input": script,
-        "voice": voice,
-        "response_format": "mp3"
-    }
-    resp = requests.post(
+    response = requests.post(
         "https://api.openai.com/v1/audio/speech",
-        json=payload,
-        headers=headers,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "tts-1",
+            "input": text,
+            "voice": voice
+        },
         timeout=120
     )
-    resp.raise_for_status()
-    return resp.content
+    response.raise_for_status()
+    return response.content
 
 
-def tts_elevenlabs(script: str, settings: dict) -> bytes:
-    api_key = settings.get("elevenlabs_api_key", "")
-    voice_id = settings.get("elevenlabs_voice_id", "")
+def generate_elevenlabs_tts(text: str, api_key: str, voice_id: str) -> bytes:
     if not api_key or not voice_id:
-        raise ValueError("ElevenLabs API key and voice ID required")
-
-    headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": script,
-        "model_id": "eleven_monolingual_v1",
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.75
-        }
-    }
-    resp = requests.post(
+        raise ValueError("ElevenLabs API key and voice ID are required")
+    response = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        json=payload,
-        headers=headers,
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json"
+        },
+        json={
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75
+            }
+        },
         timeout=180
     )
-    resp.raise_for_status()
-    return resp.content
+    response.raise_for_status()
+    return response.content
 
 
-def tts_azure(script: str, settings: dict) -> bytes:
-    import azure.cognitiveservices.speech as speechsdk
-    import io
-    import os
-    import tempfile
+def generate_azure_tts(
+    text: str,
+    api_key: str,
+    region: str,
+    voice_name: str = "en-US-AndrewNeural"
+) -> bytes:
+    if not api_key or not region:
+        raise ValueError("Azure TTS key and region are required")
 
-    azure_key = settings.get("azure_tts_key", "")
-    azure_region = settings.get("azure_tts_region", "")
-    voice_name = settings.get("azure_voice_name", "en-US-AndrewNeural")
+    token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+    token_resp = requests.post(
+        token_url,
+        headers={"Ocp-Apim-Subscription-Key": api_key},
+        timeout=10
+    )
+    token_resp.raise_for_status()
+    token = token_resp.text
 
-    if not azure_key or not azure_region:
-        raise ValueError("Azure TTS key and region required")
-
-    speech_config = speechsdk.SpeechConfig(subscription=azure_key, region=azure_region)
-    speech_config.speech_synthesis_voice_name = voice_name
-    speech_config.set_speech_synthesis_output_format(
-        speechsdk.SpeechSynthesisOutputFormat.Audio16Khz128KBitRateMonoMp3
+    ssml = (
+        f"<speak version='1.0' xml:lang='en-US'>"
+        f"<voice name='{voice_name}'>{text}</voice>"
+        f"</speak>"
     )
 
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        tmp_path = tmp.name
-
-    audio_config = speechsdk.audio.AudioOutputConfig(filename=tmp_path)
-    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-    result = synthesizer.speak_text_async(script).get()
-
-    if result.reason == speechsdk.ResultReason.Canceled:
-        cancellation = result.cancellation_details
-        raise RuntimeError(f"Azure TTS cancelled: {cancellation.reason} - {cancellation.error_details}")
-
-    with open(tmp_path, "rb") as f:
-        audio_bytes = f.read()
-    os.unlink(tmp_path)
-    return audio_bytes
+    tts_resp = requests.post(
+        f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/ssml+xml",
+            "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3"
+        },
+        data=ssml.encode("utf-8"),
+        timeout=180
+    )
+    tts_resp.raise_for_status()
+    return tts_resp.content
 
 
 def estimate_tts_cost(provider: str, char_count: int) -> float:
@@ -122,4 +126,4 @@ def estimate_tts_cost(provider: str, char_count: int) -> float:
         "azure": 0.016 / 1000
     }
     rate = rates.get(provider, 0.015 / 1000)
-    return round(char_count * rate, 4)
+    return round(char_count * rate, 6)

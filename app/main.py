@@ -6,7 +6,6 @@ import logging
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse
@@ -66,6 +65,13 @@ def update_job(job_id: str, **kwargs) -> None:
     write_job(job)
 
 
+def update_job_stats(job_id: str, **stat_fields) -> None:
+    job = read_job(job_id)
+    job.setdefault("stats", {})
+    job["stats"].update(stat_fields)
+    write_job(job)
+
+
 @app.get("/")
 async def serve_index():
     index_path = STATIC_DIR / "index.html"
@@ -115,7 +121,9 @@ async def api_upload(files: list[UploadFile] = File(...)):
             "panels_count": 0,
             "tokens_used": 0,
             "tts_chars": 0,
-            "estimated_cost": 0.0
+            "estimated_cost": 0.0,
+            "llm_cost": 0.0,
+            "tts_cost": 0.0
         }
     }
     write_job(job)
@@ -198,9 +206,10 @@ def _run_pipeline_sync(job_id: str):
     job = read_job(job_id)
     upload_paths = job.get("upload_paths", [])
 
-    def progress(pct, step):
+    def progress(pct: int, step: str):
         update_job(job_id, progress=pct, current_step=step)
 
+    # ── Stage 1: Panel detection ──────────────────────────────────────────────
     progress(10, "Detecting panels...")
 
     image_paths = []
@@ -214,17 +223,22 @@ def _run_pipeline_sync(job_id: str):
 
     panels_out_dir = str(PANELS_DIR / job_id)
     panel_paths = panels_mod.process_images_to_panels(image_paths, panels_out_dir, job_id)
+
+    update_job_stats(job_id, panels_count=len(panel_paths))
     progress(25, f"Detected {len(panel_paths)} panels. Extracting text...")
 
+    # ── Stage 2: OCR ─────────────────────────────────────────────────────────
     panel_data = []
     for i, panel_path in enumerate(panel_paths):
         text = ocr_mod.extract_text(panel_path)
         if not text:
-            logger.info(f"Panel {i} returned empty OCR, skipping")
+            logger.info(f"Panel {i} returned empty OCR, skipping in narration")
         panel_data.append((panel_path, text))
         if i % 5 == 0:
-            progress(25 + int(i / len(panel_paths) * 15), f"OCR: {i+1}/{len(panel_paths)} panels...")
+            pct = 25 + int((i / len(panel_paths)) * 15)
+            progress(pct, f"OCR: {i+1}/{len(panel_paths)} panels...")
 
+    # ── Stage 3: Script generation ────────────────────────────────────────────
     progress(40, "Writing narration script...")
 
     openrouter_key = settings.get("openrouter_api_key", "")
@@ -233,7 +247,7 @@ def _run_pipeline_sync(job_id: str):
 
     openrouter_model = settings.get("openrouter_model", "openai/gpt-4o-mini")
 
-    def script_progress(pct, step):
+    def script_progress(pct: int, step: str):
         progress(40 + pct, step)
 
     final_script, srt_content, llm_stats = script_mod.generate_script(
@@ -243,6 +257,11 @@ def _run_pipeline_sync(job_id: str):
         progress_callback=script_progress
     )
 
+    total_tokens = llm_stats.get("tokens_used", 0)
+    llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
+    update_job_stats(job_id, tokens_used=total_tokens, llm_cost=llm_cost)
+
+    # ── Stage 4: TTS ──────────────────────────────────────────────────────────
     progress(80, "Generating audio narration...")
 
     audio_out_dir = str(AUDIO_DIR / job_id)
@@ -250,6 +269,9 @@ def _run_pipeline_sync(job_id: str):
         final_script, job_id, settings, audio_out_dir
     )
 
+    update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
+
+    # ── Stage 5: Video assembly ───────────────────────────────────────────────
     progress(85, "Assembling video...")
 
     output_out_dir = OUTPUT_DIR / job_id
@@ -260,7 +282,7 @@ def _run_pipeline_sync(job_id: str):
     with open(srt_output, "w") as f:
         f.write(srt_content)
 
-    def video_progress(pct, step):
+    def video_progress(pct: int, step: str):
         progress(85 + int(pct * 0.14), step)
 
     video_mod.create_video(
@@ -272,27 +294,34 @@ def _run_pipeline_sync(job_id: str):
         progress_callback=video_progress
     )
 
-    estimated_cost = round(llm_stats.get("estimated_llm_cost", 0) + tts_cost, 4)
+    # ── Final stats ───────────────────────────────────────────────────────────
+    tts_chars_final = len(final_script)
+    estimated_cost = round(
+        (total_tokens / 1_000_000 * 0.15) + (tts_chars_final / 1_000_000 * 15),
+        6
+    )
 
-    stats = {
-        "panels_count": llm_stats.get("panels_count", len(panel_data)),
-        "tokens_used": llm_stats.get("tokens_used", 0),
-        "tts_chars": tts_chars,
-        "estimated_cost": estimated_cost,
-        "tts_cost": tts_cost,
-        "llm_cost": llm_stats.get("estimated_llm_cost", 0)
-    }
+    update_job_stats(
+        job_id,
+        panels_count=llm_stats.get("panels_count", len(panel_data)),
+        tokens_used=total_tokens,
+        tts_chars=tts_chars_final,
+        estimated_cost=estimated_cost,
+        llm_cost=llm_cost,
+        tts_cost=tts_cost
+    )
 
-    update_job(job_id,
-               status="complete",
-               progress=100,
-               current_step="Complete!",
-               stats=stats)
+    update_job(
+        job_id,
+        status="complete",
+        progress=100,
+        current_step="Complete!"
+    )
 
-    _cleanup_job(job_id, upload_paths)
+    _cleanup_job(job_id)
 
 
-def _cleanup_job(job_id: str, upload_paths: list):
+def _cleanup_job(job_id: str):
     try:
         job_upload_dir = UPLOADS_DIR / job_id
         if job_upload_dir.exists():
@@ -309,5 +338,5 @@ def _cleanup_job(job_id: str, upload_paths: list):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 5000))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)

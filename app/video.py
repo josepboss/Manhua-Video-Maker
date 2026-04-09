@@ -20,6 +20,40 @@ def get_audio_duration(audio_path: str) -> float:
     return 0.0
 
 
+def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape") -> None:
+    if resolution == "landscape":
+        w, h = "1920", "1080"
+    else:
+        w, h = "1080", "1920"
+
+    d = int(duration * 25)
+    vf = (
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
+        f"zoompan=z='min(zoom+0.0015,1.5)'"
+        f":x='iw/2-(iw/zoom/2)'"
+        f":y='ih/2-(ih/zoom/2)'"
+        f":d={d}"
+        f":s={w}x{h}"
+        f":fps=25"
+    )
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1",
+        "-i", panel_path,
+        "-vf", vf,
+        "-t", str(duration),
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        clip_path
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg clip failed for {panel_path}: {result.stderr[-500:]}")
+
+
 def create_video(
     panels: List[Tuple[str, str]],
     audio_path: str,
@@ -30,10 +64,10 @@ def create_video(
 ) -> str:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    video_format = settings.get("video_format", "vertical")
-    watermark = settings.get("channel_watermark", "ManhuaRecap")
+    resolution = settings.get("video_format", "landscape")
+    watermark_text = settings.get("watermark_text", "ManhuaRecap").replace("'", "")
 
-    if video_format == "landscape":
+    if resolution == "landscape":
         target_w, target_h = 1920, 1080
     else:
         target_w, target_h = 1080, 1920
@@ -53,7 +87,7 @@ def create_video(
     duration_per_panel = max(duration_per_panel, 2.0)
 
     if progress_callback:
-        progress_callback(80, "Assembling video clips...")
+        progress_callback(0, "Assembling video clips...")
 
     concat_list_path = str(Path(output_path).parent / "concat_list.txt")
     clip_paths = []
@@ -62,48 +96,30 @@ def create_video(
         clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
         clip_paths.append(clip_path)
 
-        d = int(duration_per_panel * 25)
-        vf = (
-            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
-            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"zoompan=z='min(zoom+0.0015,1.5)'"
-            f":x='iw/2-(iw/zoom/2)'"
-            f":y='ih/2-(ih/zoom/2)'"
-            f":d={d}"
-            f":s={target_w}x{target_h}"
-            f":fps=25"
-        )
+        try:
+            make_panel_clip(img_path, clip_path, duration_per_panel, resolution)
+        except RuntimeError as e:
+            logger.error(f"Clip {i} failed: {e}")
+            raise
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-loop", "1",
-            "-i", img_path,
-            "-vf", vf,
-            "-t", str(duration_per_panel),
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-pix_fmt", "yuv420p",
-            clip_path
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-        if result.returncode != 0:
-            logger.error(f"FFmpeg clip {i} failed: {result.stderr}")
-            raise RuntimeError(f"FFmpeg failed creating clip {i}: {result.stderr[-500:]}")
+        if progress_callback:
+            pct = int((i + 1) / len(selected_panels) * 80)
+            progress_callback(pct, f"Encoding clip {i+1}/{len(selected_panels)}...")
 
     with open(concat_list_path, "w") as f:
         for cp in clip_paths:
             f.write(f"file '{cp}'\n")
 
     if progress_callback:
-        progress_callback(90, "Concatenating clips and adding audio...")
+        progress_callback(85, "Concatenating clips and adding audio...")
 
-    watermark_safe = watermark.replace("'", "")
     drawtext = (
-        f"drawtext=text='{watermark_safe}'"
-        f":fontcolor=white@0.6"
-        f":fontsize=36"
+        f"drawtext=text='{watermark_text}'"
+        f":fontcolor=white"
+        f":fontsize=24"
+        f":alpha=0.6"
         f":x=(w-text_w)/2"
-        f":y=h-60"
+        f":y=h-50"
         f":shadowcolor=black@0.5"
         f":shadowx=2:shadowy=2"
     )
@@ -140,5 +156,3 @@ def create_video(
         pass
 
     return output_path
-
-

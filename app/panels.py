@@ -48,7 +48,7 @@ def detect_panels(image_path: str, output_dir: str, job_id: str, page_idx: int) 
         cv2.imwrite(str(out_path), img)
         return [str(out_path)]
 
-    panels = sorted(panels, key=lambda p: (p[1] // 100, p[0]))
+    panels.sort(key=lambda b: (b[1] // 50, b[0]))
 
     panel_paths = []
     for i, (x, y, w, h) in enumerate(panels):
