@@ -240,33 +240,6 @@
         </div>
       </div>
 
-      <div class="card p-6 space-y-5">
-        <h2 class="text-base font-semibold text-white">Buffer Integration</h2>
-        <p class="text-sm text-slate-400">Connect Buffer to schedule or publish generated videos directly from ManhuaRecap.</p>
-        <div>
-          <label class="label">Buffer Access Token</label>
-          <input type="password" id="buffer_access_token" placeholder="Your Buffer access token" class="input-field" />
-        </div>
-        <div>
-          <label class="label">Buffer Profile</label>
-          <select id="buffer_profile_id" class="input-field">
-            <option value="">— select a profile or paste ID below —</option>
-          </select>
-          <input type="text" id="buffer_profile_id_manual" placeholder="Paste Profile ID manually" class="input-field mt-2" />
-        </div>
-        <div>
-          <label class="label">Default Schedule</label>
-          <select id="buffer_schedule" class="input-field">
-            <option value="queue">Add to Queue</option>
-            <option value="now">Post Now</option>
-          </select>
-        </div>
-        <div class="flex items-center gap-4">
-          <button onclick="testBufferConnection()" class="btn-secondary">Test Connection</button>
-          <p id="buffer-status" class="text-sm"></p>
-        </div>
-      </div>
-
       <div class="flex items-center gap-4">
         <button onclick="saveSettings()" class="btn-primary">Save Settings</button>
         <span id="save-msg" class="text-sm hidden text-green-400 font-medium">Settings saved!</span>
@@ -389,19 +362,6 @@
           <div id="cost-rows" class="space-y-0 rounded-lg overflow-hidden p-4" style="background:#0f0f13; border: 1px solid #2d2d3d;"></div>
         </div>
 
-        <div id="buffer-actions" class="hidden pt-2 border-t border-slate-700 space-y-3">
-          <h4 class="text-sm font-semibold text-slate-300">Publish to Buffer</h4>
-          <input type="text" id="video-title" placeholder="Video title / caption for Buffer post" class="input-field" />
-          <div class="flex items-center gap-4">
-            <button onclick="sendToBuffer()" class="btn-secondary flex items-center gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l4-4m0 0l4 4m-4-4v12" />
-              </svg>
-              Send to Buffer
-            </button>
-            <p id="buffer-send-status" class="text-sm"></p>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -489,9 +449,6 @@
         document.getElementById('watermark_text').value = s.watermark_text || 'ManhuaRecap';
         document.getElementById('ocr_language').value = s.ocr_language || 'en';
         document.getElementById('narration_language').value = s.narration_language || 'English';
-        document.getElementById('buffer_access_token').value = s.buffer_access_token || '';
-        document.getElementById('buffer_profile_id_manual').value = s.buffer_profile_id || '';
-        document.getElementById('buffer_schedule').value = s.buffer_schedule || 'queue';
         onOcrLangChange();
 
         const ttsProvider = s.tts_provider || 'openai';
@@ -522,10 +479,7 @@
         video_format: document.querySelector('input[name="video_format"]:checked')?.value || 'landscape',
         watermark_text: document.getElementById('watermark_text').value,
         ocr_language: document.getElementById('ocr_language').value,
-        narration_language: document.getElementById('narration_language').value,
-        buffer_access_token: document.getElementById('buffer_access_token').value,
-        buffer_profile_id: document.getElementById('buffer_profile_id').value || document.getElementById('buffer_profile_id_manual').value,
-        buffer_schedule: document.getElementById('buffer_schedule').value
+        narration_language: document.getElementById('narration_language').value
       };
       try {
         const res = await fetch('/api/settings', {
@@ -720,16 +674,6 @@
       }
 
       updateHistoryItem(job.job_id, 'complete');
-
-      // Show Buffer publish section if token is configured
-      const bufferToken = document.getElementById('buffer_access_token').value;
-      const bufferActions = document.getElementById('buffer-actions');
-      if (bufferToken) {
-        bufferActions.classList.remove('hidden');
-        document.getElementById('buffer-send-status').textContent = '';
-      } else {
-        bufferActions.classList.add('hidden');
-      }
     }
 
     function onFailed(job) {
@@ -819,87 +763,6 @@
         else if (job.status === 'processing') startPolling(jobId);
       } catch(e) {
         console.error(e);
-      }
-    }
-
-    // Buffer integration
-    async function testBufferConnection() {
-      const token = document.getElementById('buffer_access_token').value;
-      const statusEl = document.getElementById('buffer-status');
-      if (!token) {
-        statusEl.textContent = '❌ Please enter an access token first.';
-        statusEl.className = 'text-sm text-red-400';
-        return;
-      }
-      statusEl.textContent = 'Testing...';
-      statusEl.className = 'text-sm text-slate-400';
-      try {
-        const res = await fetch('/api/buffer/test', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({access_token: token})
-        });
-        const data = await res.json();
-        if (data.success) {
-          statusEl.textContent = '✅ Connected: ' + data.name;
-          statusEl.className = 'text-sm text-green-400';
-          await loadBufferProfiles();
-        } else {
-          statusEl.textContent = '❌ Failed: ' + data.error;
-          statusEl.className = 'text-sm text-red-400';
-        }
-      } catch(e) {
-        statusEl.textContent = '❌ Error: ' + e.message;
-        statusEl.className = 'text-sm text-red-400';
-      }
-    }
-
-    async function loadBufferProfiles() {
-      try {
-        const res = await fetch('/api/buffer/profiles');
-        const data = await res.json();
-        if (data.success && data.profiles && data.profiles.length > 0) {
-          const select = document.getElementById('buffer_profile_id');
-          // Clear existing options except the placeholder
-          select.innerHTML = '<option value="">— select a profile —</option>';
-          data.profiles.forEach(p => {
-            const opt = document.createElement('option');
-            opt.value = p.id;
-            opt.textContent = `${p.service} — ${p.formatted_username}`;
-            select.appendChild(opt);
-          });
-          // If a saved profile_id exists, pre-select it
-          const savedId = document.getElementById('buffer_profile_id_manual').value;
-          if (savedId) select.value = savedId;
-        }
-      } catch(e) {
-        console.error('Failed to load Buffer profiles:', e);
-      }
-    }
-
-    async function sendToBuffer() {
-      const jobId = currentJobId;
-      const caption = document.getElementById('video-title').value;
-      const statusEl = document.getElementById('buffer-send-status');
-      statusEl.textContent = 'Sending...';
-      statusEl.className = 'text-sm text-slate-400';
-      try {
-        const res = await fetch(`/api/buffer/send/${jobId}`, {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({caption})
-        });
-        const data = await res.json();
-        if (data.success) {
-          statusEl.textContent = '✅ Sent to Buffer successfully!';
-          statusEl.className = 'text-sm text-green-400';
-        } else {
-          statusEl.textContent = '❌ Error: ' + data.error;
-          statusEl.className = 'text-sm text-red-400';
-        }
-      } catch(e) {
-        statusEl.textContent = '❌ Error: ' + e.message;
-        statusEl.className = 'text-sm text-red-400';
       }
     }
 
