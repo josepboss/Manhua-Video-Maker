@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, save_settings
+from app import scraper as scraper_mod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -197,6 +198,41 @@ async def api_debug_job(job_id: str):
     else:
         return {"error": f"No panels directory found for job {job_id}", "ocr_results": []}
     return {"job_id": job_id, "panel_count": len(ocr_results), "ocr_results": ocr_results}
+
+
+@app.post("/api/scraper/fetch")
+async def scraper_fetch(body: dict):
+    url = body.get("url", "").strip()
+    selector = body.get("selector", "").strip()
+
+    if not url:
+        return {"success": False, "error": "URL is required"}
+
+    result = scraper_mod.fetch_chapter(url, selector)
+
+    if result["success"]:
+        job_id = result["job_id"]
+        job = {
+            "job_id": job_id,
+            "status": "queued",
+            "progress": 0,
+            "current_step": "Images scraped and ready",
+            "error_message": None,
+            "created_at": datetime.utcnow().isoformat(),
+            "upload_paths": result["image_paths"],
+            "source_url": url,
+            "stats": {
+                "panels_count": 0,
+                "tokens_used": 0,
+                "tts_chars": 0,
+                "estimated_cost": 0.0,
+                "llm_cost": 0.0,
+                "tts_cost": 0.0
+            }
+        }
+        write_job(job)
+
+    return result
 
 
 @app.get("/api/jobs")
