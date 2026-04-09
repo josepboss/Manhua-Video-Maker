@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+paddleocr
+paddlepaddle
+opencv-python-headless
+pdf2image
+Pillow
+requests
+openai
+azure-cognitiveservices-speech
+python-dotenv
+aiofiles

@@ -1,0 +1,62 @@
+Backend requirements:
+config.py
+	•	Load and save settings.json
+	•	Expose get_settings() and save_settings() functions
+main.py
+	•	FastAPI app
+	•	Routes:
+	•	GET / → serve index.html
+	•	GET /api/settings → return current settings
+	•	POST /api/settings → save updated settings
+	•	POST /api/upload → accept multiple images or single PDF, save to /uploads, return job_id
+	•	POST /api/process/{job_id} → start background processing pipeline
+	•	GET /api/status/{job_id} → return job status and progress percentage
+	•	GET /api/download/{job_id} → return final MP4
+	•	GET /api/download/{job_id}/srt → return subtitle SRT file
+panels.py
+	•	Accept list of image paths
+	•	If input is PDF: convert each page to image using pdf2image
+	•	For each page image:
+	•	Use OpenCV to detect panels (contour detection)
+	•	Fallback: if fewer than 2 panels detected, treat whole page as one panel
+	•	Sort panels top-to-bottom, left-to-right
+	•	Save each panel as PNG to /panels/{job_id}/
+	•	Return ordered list of panel image paths
+ocr.py
+	•	Accept panel image path
+	•	Run PaddleOCR on image
+	•	Clean output: strip noise, fix spacing, remove single-character artifacts
+	•	Return extracted text string per panel
+context.py
+	•	Maintain a rolling narrative context buffer (last 5 panels summary)
+	•	Used to give LLM awareness of what happened recently
+	•	Expose update_context(panel_summary) and get_context() functions
+script.py
+	•	Accept list of (panel_image_path, extracted_text) tuples
+	•	For each panel:
+	•	Call OpenRouter API with:
+	•	System prompt: “You are a narrator for manhua recap videos. Convert raw dialogue and text into third-person narrative storytelling. Never keep dialogue format. Merge lines into coherent flowing sentences. Remove filler. Be concise but dramatic.”
+	•	User prompt: include rolling context + current panel text
+	•	Collect per-panel narration
+	•	After all panels processed:
+	•	Send full narration to OpenRouter for final pass: merge into one continuous script, add pacing (short sentences for action, longer for exposition), target 5-12 minutes read time (~700-1700 words)
+	•	Also generate SRT subtitle data from the script (split by sentence, assign timestamps based on estimated reading speed of 150 words per minute)
+	•	Return: final_script (string), srt_content (string)
+tts.py
+	•	Accept script text and settings
+	•	Based on tts_provider in settings:
+	•	“elevenlabs”: POST to ElevenLabs v1/text-to-speech/{voice_id} API, return MP3 bytes
+	•	“azure”: use Azure Cognitive Services TTS SDK, return MP3 bytes
+	•	“openai”: POST to OpenAI audio/speech endpoint using openai_tts_key, return MP3 bytes
+	•	Save output to /audio/{job_id}/narration.mp3
+video.py
+	•	Select key panels: pick panels that have extracted text (skip blank/action-only panels if text was empty)
+	•	For each selected panel image:
+	•	Apply zoom/pan motion effect using FFmpeg filtergraph (Ken Burns effect)
+	•	Duration per panel = total audio duration / number of selected panels
+	•	Assemble using FFmpeg:
+	•	Concat all panel clips
+	•	Add narration audio
+	•	Burn in subtle bottom-center channel watermark text (channel name from settings, default “ManhuaRecap”)
+	•	Output as 1080x1920 (vertical/Shorts-friendly) or 1920x1080 (landscape), selectable in settings
+	•	Save to /output/{job_id}/final.mp4

@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ManhuaRecap</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0f0f13; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+    .tab-active { border-bottom: 2px solid #a855f7; color: #a855f7; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #94a3b8; }
+    .tab-inactive:hover { color: #cbd5e1; }
+    .card { background: #1a1a24; border: 1px solid #2d2d3d; border-radius: 12px; }
+    .input-field {
+      background: #0f0f13;
+      border: 1px solid #3d3d52;
+      color: #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      width: 100%;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    .input-field:focus { outline: none; border-color: #a855f7; }
+    .btn-primary {
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+    .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-secondary {
+      background: #2d2d3d;
+      color: #e2e8f0;
+      border: 1px solid #3d3d52;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-secondary:hover { background: #3d3d52; }
+    .progress-bar-fill { transition: width 0.5s ease; background: linear-gradient(90deg, #7c3aed, #a855f7); }
+    .drop-zone {
+      border: 2px dashed #3d3d52;
+      border-radius: 12px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone.drag-over { border-color: #a855f7; background: rgba(168,85,247,0.05); }
+    .label { font-size: 13px; font-weight: 500; color: #94a3b8; margin-bottom: 6px; display: block; }
+    .step-item { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+    .step-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .step-dot.done { background: #22c55e; }
+    .step-dot.active { background: #a855f7; animation: pulse 1.5s infinite; }
+    .step-dot.pending { background: #3d3d52; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .history-item { display: flex; justify-content: space-between; align-items: center; padding: 14px; border-radius: 8px; background: #0f0f13; border: 1px solid #2d2d3d; }
+    .badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 600; }
+    .badge-complete { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .badge-processing { background: rgba(168,85,247,0.15); color: #a855f7; }
+    .badge-failed { background: rgba(239,68,68,0.15); color: #ef4444; }
+    .badge-queued { background: rgba(148,163,184,0.15); color: #94a3b8; }
+    select.input-field { appearance: auto; }
+    .radio-option { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; border: 1px solid #3d3d52; cursor: pointer; transition: border-color 0.2s; }
+    .radio-option:has(input:checked) { border-color: #a855f7; background: rgba(168,85,247,0.05); }
+    .cost-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2d2d3d; font-size: 14px; }
+    .cost-row:last-child { border-bottom: none; font-weight: 600; color: #a855f7; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div class="max-w-4xl mx-auto px-4 py-8">
+    <!-- Header -->
+    <div class="flex items-center gap-4 mb-8">
+      <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: linear-gradient(135deg,#7c3aed,#a855f7);">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.069A1 1 0 0121 8.882v6.236a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+        </svg>
+      </div>
+      <div>
+        <h1 class="text-2xl font-bold text-white">ManhuaRecap</h1>
+        <p class="text-sm text-slate-400">Manhua to Video Pipeline</p>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex gap-6 border-b border-slate-700 mb-8">
+      <button onclick="switchTab('settings')" id="tab-settings" class="tab-active pb-3 text-sm font-semibold transition-colors">Settings</button>
+      <button onclick="switchTab('generate')" id="tab-generate" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Generate</button>
+      <button onclick="switchTab('history')" id="tab-history" class="tab-inactive pb-3 text-sm font-semibold transition-colors">History</button>
+    </div>
+
+    <!-- Settings Tab -->
+    <div id="panel-settings" class="space-y-6">
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">LLM Settings</h2>
+        <div>
+          <label class="label">OpenRouter API Key</label>
+          <input type="password" id="openrouter_api_key" placeholder="sk-or-..." class="input-field" />
+        </div>
+        <div>
+          <label class="label">OpenRouter Model</label>
+          <input type="text" id="openrouter_model" placeholder="openai/gpt-4o-mini" class="input-field" />
+        </div>
+      </div>
+
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">TTS Provider</h2>
+        <div class="flex gap-3 flex-wrap">
+          <label class="radio-option flex-1">
+            <input type="radio" name="tts_provider" value="openai" class="accent-purple-500" onchange="onTTSChange()" />
+            <span class="text-sm font-medium">OpenAI TTS</span>
+          </label>
+          <label class="radio-option flex-1">
+            <input type="radio" name="tts_provider" value="elevenlabs" class="accent-purple-500" onchange="onTTSChange()" />
+            <span class="text-sm font-medium">ElevenLabs</span>
+          </label>
+          <label class="radio-option flex-1">
+            <input type="radio" name="tts_provider" value="azure" class="accent-purple-500" onchange="onTTSChange()" />
+            <span class="text-sm font-medium">Azure TTS</span>
+          </label>
+        </div>
+
+        <div id="tts-openai" class="space-y-4">
+          <div>
+            <label class="label">OpenAI API Key</label>
+            <input type="password" id="openai_tts_key" placeholder="sk-..." class="input-field" />
+          </div>
+          <div>
+            <label class="label">Voice</label>
+            <select id="openai_tts_voice" class="input-field">
+              <option value="onyx">onyx (deep, dramatic)</option>
+              <option value="alloy">alloy (neutral)</option>
+              <option value="echo">echo (mellow)</option>
+              <option value="fable">fable (warm)</option>
+              <option value="nova">nova (bright)</option>
+              <option value="shimmer">shimmer (expressive)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="tts-elevenlabs" class="space-y-4 hidden">
+          <div>
+            <label class="label">ElevenLabs API Key</label>
+            <input type="password" id="elevenlabs_api_key" placeholder="..." class="input-field" />
+          </div>
+          <div>
+            <label class="label">Voice ID</label>
+            <input type="text" id="elevenlabs_voice_id" placeholder="21m00Tcm4TlvDq8ikWAM" class="input-field" />
+          </div>
+        </div>
+
+        <div id="tts-azure" class="space-y-4 hidden">
+          <div>
+            <label class="label">Azure TTS Key</label>
+            <input type="password" id="azure_tts_key" placeholder="..." class="input-field" />
+          </div>
+          <div>
+            <label class="label">Azure Region</label>
+            <input type="text" id="azure_tts_region" placeholder="eastus" class="input-field" />
+          </div>
+          <div>
+            <label class="label">Voice Name</label>
+            <input type="text" id="azure_voice_name" placeholder="en-US-AndrewNeural" class="input-field" />
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">Video Settings</h2>
+        <div>
+          <label class="label">Video Format</label>
+          <div class="flex gap-3">
+            <label class="radio-option flex-1">
+              <input type="radio" name="video_format" value="vertical" class="accent-purple-500" />
+              <span class="text-sm font-medium">Shorts / Vertical (1080×1920)</span>
+            </label>
+            <label class="radio-option flex-1">
+              <input type="radio" name="video_format" value="landscape" class="accent-purple-500" />
+              <span class="text-sm font-medium">Landscape (1920×1080)</span>
+            </label>
+          </div>
+        </div>
+        <div>
+          <label class="label">Channel Watermark</label>
+          <input type="text" id="channel_watermark" placeholder="ManhuaRecap" class="input-field" />
+        </div>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <button onclick="saveSettings()" class="btn-primary">Save Settings</button>
+        <span id="save-msg" class="text-sm hidden text-green-400 font-medium">Settings saved!</span>
+        <span id="save-err" class="text-sm hidden text-red-400 font-medium"></span>
+      </div>
+    </div>
+
+    <!-- Generate Tab -->
+    <div id="panel-generate" class="hidden space-y-6">
+      <div class="card p-6 space-y-4">
+        <h2 class="text-base font-semibold text-white">Upload Manhua</h2>
+        <p class="text-sm text-slate-400">Upload JPG/PNG image files (individual panels or pages) or a single PDF.</p>
+        <div id="drop-zone" class="drop-zone flex flex-col items-center justify-center gap-3 py-14 cursor-pointer" onclick="document.getElementById('file-input').click()">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-10 h-10 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          <p class="text-slate-400 text-sm">Drag & drop images or PDF here</p>
+          <p class="text-slate-500 text-xs">JPG, PNG, or PDF supported</p>
+        </div>
+        <input type="file" id="file-input" class="hidden" multiple accept=".jpg,.jpeg,.png,.pdf" onchange="handleFiles(this.files)" />
+
+        <div id="file-list" class="hidden">
+          <div class="flex items-center justify-between mb-2">
+            <p class="text-sm font-medium text-slate-300" id="file-count"></p>
+            <button onclick="clearFiles()" class="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+          </div>
+          <div id="file-items" class="space-y-1 max-h-40 overflow-y-auto pr-1"></div>
+        </div>
+      </div>
+
+      <!-- PaddleOCR notice -->
+      <div class="rounded-lg p-4 flex gap-3 items-start" style="background: rgba(234,179,8,0.08); border: 1px solid rgba(234,179,8,0.2);">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        <p class="text-sm text-yellow-300">On first run, PaddleOCR will download its models (~200MB). This may take a minute. Subsequent runs will be faster.</p>
+      </div>
+
+      <button id="generate-btn" onclick="startGeneration()" class="btn-primary w-full py-3 text-base">
+        Generate Video
+      </button>
+
+      <!-- Progress Section -->
+      <div id="progress-section" class="card p-6 space-y-5 hidden">
+        <div class="flex items-center justify-between">
+          <h3 class="font-semibold text-white">Processing</h3>
+          <span id="progress-pct" class="text-sm font-mono text-purple-400">0%</span>
+        </div>
+        <div class="w-full h-2 rounded-full" style="background:#2d2d3d;">
+          <div id="progress-bar" class="progress-bar-fill h-2 rounded-full" style="width:0%"></div>
+        </div>
+
+        <div class="space-y-0">
+          <div class="step-item">
+            <div class="step-dot" id="step-panels"></div>
+            <span class="text-sm text-slate-300">Detecting panels</span>
+          </div>
+          <div class="step-item">
+            <div class="step-dot" id="step-ocr"></div>
+            <span class="text-sm text-slate-300">Extracting text (OCR)</span>
+          </div>
+          <div class="step-item">
+            <div class="step-dot" id="step-script"></div>
+            <span class="text-sm text-slate-300">Writing narration script</span>
+          </div>
+          <div class="step-item">
+            <div class="step-dot" id="step-audio"></div>
+            <span class="text-sm text-slate-300">Generating audio</span>
+          </div>
+          <div class="step-item">
+            <div class="step-dot" id="step-video"></div>
+            <span class="text-sm text-slate-300">Assembling video</span>
+          </div>
+        </div>
+
+        <p id="step-label" class="text-sm text-slate-400 italic"></p>
+
+        <div id="error-box" class="hidden rounded-lg p-4" style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2);">
+          <p class="text-sm text-red-400 font-medium">Error</p>
+          <p id="error-msg" class="text-sm text-red-300 mt-1"></p>
+        </div>
+      </div>
+
+      <!-- Completion Section -->
+      <div id="complete-section" class="card p-6 space-y-5 hidden">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full bg-green-500 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+            </svg>
+          </div>
+          <h3 class="font-semibold text-white">Video Ready!</h3>
+        </div>
+
+        <div class="flex gap-3 flex-wrap">
+          <a id="download-mp4" href="#" class="btn-primary flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download MP4
+          </a>
+          <a id="download-srt" href="#" class="btn-secondary flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            Download SRT
+          </a>
+        </div>
+
+        <div id="cost-breakdown" class="hidden">
+          <h4 class="text-sm font-semibold text-slate-300 mb-3">Cost Estimate</h4>
+          <div id="cost-rows" class="space-y-0 rounded-lg overflow-hidden p-4" style="background:#0f0f13; border: 1px solid #2d2d3d;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Tab -->
+    <div id="panel-history" class="hidden space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base font-semibold text-white">Job History</h2>
+        <button onclick="clearHistory()" class="text-sm text-slate-500 hover:text-slate-300">Clear History</button>
+      </div>
+      <div id="history-list" class="space-y-3">
+        <p class="text-slate-500 text-sm">No history yet.</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'settings';
+    let currentJobId = null;
+    let pollInterval = null;
+    let selectedFiles = [];
+
+    // Tab switching
+    function switchTab(tab) {
+      document.querySelectorAll('[id^="panel-"]').forEach(el => el.classList.add('hidden'));
+      document.getElementById('panel-' + tab).classList.remove('hidden');
+      document.querySelectorAll('[id^="tab-"]').forEach(el => {
+        el.className = 'tab-inactive pb-3 text-sm font-semibold transition-colors';
+      });
+      document.getElementById('tab-' + tab).className = 'tab-active pb-3 text-sm font-semibold transition-colors';
+      currentTab = tab;
+      if (tab === 'history') renderHistory();
+    }
+
+    // TTS provider toggle
+    function onTTSChange() {
+      const provider = document.querySelector('input[name="tts_provider"]:checked')?.value;
+      document.getElementById('tts-openai').classList.toggle('hidden', provider !== 'openai');
+      document.getElementById('tts-elevenlabs').classList.toggle('hidden', provider !== 'elevenlabs');
+      document.getElementById('tts-azure').classList.toggle('hidden', provider !== 'azure');
+    }
+
+    // Load settings from API
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/settings');
+        const s = await res.json();
+        document.getElementById('openrouter_api_key').value = s.openrouter_api_key || '';
+        document.getElementById('openrouter_model').value = s.openrouter_model || 'openai/gpt-4o-mini';
+        document.getElementById('openai_tts_key').value = s.openai_tts_key || '';
+        document.getElementById('openai_tts_voice').value = s.openai_tts_voice || 'onyx';
+        document.getElementById('elevenlabs_api_key').value = s.elevenlabs_api_key || '';
+        document.getElementById('elevenlabs_voice_id').value = s.elevenlabs_voice_id || '';
+        document.getElementById('azure_tts_key').value = s.azure_tts_key || '';
+        document.getElementById('azure_tts_region').value = s.azure_tts_region || '';
+        document.getElementById('azure_voice_name').value = s.azure_voice_name || 'en-US-AndrewNeural';
+        document.getElementById('channel_watermark').value = s.channel_watermark || 'ManhuaRecap';
+
+        const ttsProvider = s.tts_provider || 'openai';
+        const ttsRadio = document.querySelector(`input[name="tts_provider"][value="${ttsProvider}"]`);
+        if (ttsRadio) ttsRadio.checked = true;
+        onTTSChange();
+
+        const videoFormat = s.video_format || 'vertical';
+        const videoRadio = document.querySelector(`input[name="video_format"][value="${videoFormat}"]`);
+        if (videoRadio) videoRadio.checked = true;
+      } catch(e) {
+        console.error('Failed to load settings:', e);
+      }
+    }
+
+    async function saveSettings() {
+      const s = {
+        openrouter_api_key: document.getElementById('openrouter_api_key').value,
+        openrouter_model: document.getElementById('openrouter_model').value,
+        tts_provider: document.querySelector('input[name="tts_provider"]:checked')?.value || 'openai',
+        openai_tts_key: document.getElementById('openai_tts_key').value,
+        openai_tts_voice: document.getElementById('openai_tts_voice').value,
+        elevenlabs_api_key: document.getElementById('elevenlabs_api_key').value,
+        elevenlabs_voice_id: document.getElementById('elevenlabs_voice_id').value,
+        azure_tts_key: document.getElementById('azure_tts_key').value,
+        azure_tts_region: document.getElementById('azure_tts_region').value,
+        azure_voice_name: document.getElementById('azure_voice_name').value,
+        video_format: document.querySelector('input[name="video_format"]:checked')?.value || 'vertical',
+        channel_watermark: document.getElementById('channel_watermark').value
+      };
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(s)
+        });
+        if (res.ok) {
+          const msg = document.getElementById('save-msg');
+          document.getElementById('save-err').classList.add('hidden');
+          msg.classList.remove('hidden');
+          setTimeout(() => msg.classList.add('hidden'), 2500);
+        } else {
+          throw new Error('Failed to save');
+        }
+      } catch(e) {
+        const err = document.getElementById('save-err');
+        err.textContent = 'Save failed: ' + e.message;
+        err.classList.remove('hidden');
+      }
+    }
+
+    // File upload handling
+    const dropZone = document.getElementById('drop-zone');
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      handleFiles(e.dataTransfer.files);
+    });
+
+    function handleFiles(fileList) {
+      selectedFiles = Array.from(fileList);
+      renderFileList();
+    }
+
+    function clearFiles() {
+      selectedFiles = [];
+      document.getElementById('file-input').value = '';
+      renderFileList();
+    }
+
+    function renderFileList() {
+      const container = document.getElementById('file-list');
+      const items = document.getElementById('file-items');
+      if (!selectedFiles.length) {
+        container.classList.add('hidden');
+        return;
+      }
+      container.classList.remove('hidden');
+      document.getElementById('file-count').textContent = `${selectedFiles.length} file${selectedFiles.length !== 1 ? 's' : ''} selected`;
+      items.innerHTML = selectedFiles.map(f => `
+        <div class="flex items-center justify-between text-sm py-1">
+          <span class="text-slate-300 truncate">${f.name}</span>
+          <span class="text-slate-500 text-xs ml-2 flex-shrink-0">${formatBytes(f.size)}</span>
+        </div>
+      `).join('');
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    async function startGeneration() {
+      if (!selectedFiles.length) {
+        alert('Please select files first.');
+        return;
+      }
+
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = true;
+      btn.textContent = 'Uploading...';
+
+      document.getElementById('complete-section').classList.add('hidden');
+      document.getElementById('progress-section').classList.remove('hidden');
+      document.getElementById('error-box').classList.add('hidden');
+      resetSteps();
+
+      try {
+        // Upload files
+        const formData = new FormData();
+        selectedFiles.forEach(f => formData.append('files', f));
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+        if (!uploadRes.ok) throw new Error('Upload failed: ' + await uploadRes.text());
+        const { job_id } = await uploadRes.json();
+        currentJobId = job_id;
+
+        // Start processing
+        const processRes = await fetch(`/api/process/${job_id}`, { method: 'POST' });
+        if (!processRes.ok) throw new Error('Failed to start processing: ' + await processRes.text());
+
+        btn.textContent = 'Processing...';
+        saveToHistory(job_id, 'processing');
+        startPolling(job_id);
+      } catch(e) {
+        btn.disabled = false;
+        btn.textContent = 'Generate Video';
+        showError(e.message);
+      }
+    }
+
+    function startPolling(jobId) {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(() => pollStatus(jobId), 3000);
+      pollStatus(jobId);
+    }
+
+    async function pollStatus(jobId) {
+      try {
+        const res = await fetch(`/api/status/${jobId}`);
+        if (!res.ok) return;
+        const job = await res.json();
+        updateProgress(job);
+
+        if (job.status === 'complete') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          onComplete(job);
+        } else if (job.status === 'failed') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          onFailed(job);
+        }
+      } catch(e) {
+        console.error('Poll error:', e);
+      }
+    }
+
+    function updateProgress(job) {
+      const pct = job.progress || 0;
+      document.getElementById('progress-bar').style.width = pct + '%';
+      document.getElementById('progress-pct').textContent = pct + '%';
+      document.getElementById('step-label').textContent = job.current_step || '';
+      updateSteps(pct, job.current_step || '');
+    }
+
+    function updateSteps(pct, step) {
+      const steps = ['panels', 'ocr', 'script', 'audio', 'video'];
+      const thresholds = [10, 30, 40, 80, 85];
+
+      steps.forEach((s, i) => {
+        const el = document.getElementById('step-' + s);
+        if (pct >= 100 || (i < steps.length - 1 && pct > thresholds[i + 1])) {
+          el.className = 'step-dot done';
+        } else if (pct >= thresholds[i]) {
+          el.className = 'step-dot active';
+        } else {
+          el.className = 'step-dot pending';
+        }
+      });
+    }
+
+    function resetSteps() {
+      ['panels','ocr','script','audio','video'].forEach(s => {
+        document.getElementById('step-' + s).className = 'step-dot pending';
+      });
+      document.getElementById('progress-bar').style.width = '0%';
+      document.getElementById('progress-pct').textContent = '0%';
+    }
+
+    function onComplete(job) {
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = false;
+      btn.textContent = 'Generate Video';
+      updateSteps(100, '');
+
+      document.getElementById('complete-section').classList.remove('hidden');
+      document.getElementById('download-mp4').href = `/api/download/${job.job_id}`;
+      document.getElementById('download-srt').href = `/api/download/${job.job_id}/srt`;
+
+      const stats = job.stats || {};
+      if (stats.panels_count || stats.tokens_used || stats.tts_chars) {
+        const rows = document.getElementById('cost-rows');
+        const ttsProvider = stats.tts_provider || 'openai';
+        rows.innerHTML = `
+          <div class="cost-row"><span class="text-slate-400">Panels processed</span><span>${stats.panels_count || 0}</span></div>
+          <div class="cost-row"><span class="text-slate-400">LLM tokens used</span><span>${(stats.tokens_used || 0).toLocaleString()}</span></div>
+          <div class="cost-row"><span class="text-slate-400">LLM cost (est.)</span><span>$${(stats.llm_cost || 0).toFixed(4)}</span></div>
+          <div class="cost-row"><span class="text-slate-400">TTS characters</span><span>${(stats.tts_chars || 0).toLocaleString()}</span></div>
+          <div class="cost-row"><span class="text-slate-400">TTS cost (est.)</span><span>$${(stats.tts_cost || 0).toFixed(4)}</span></div>
+          <div class="cost-row"><span>Total estimated cost</span><span>$${(stats.estimated_cost || 0).toFixed(4)}</span></div>
+        `;
+        document.getElementById('cost-breakdown').classList.remove('hidden');
+      }
+
+      updateHistoryItem(job.job_id, 'complete');
+    }
+
+    function onFailed(job) {
+      const btn = document.getElementById('generate-btn');
+      btn.disabled = false;
+      btn.textContent = 'Generate Video';
+      showError(job.error_message || 'Unknown error');
+      updateHistoryItem(job.job_id, 'failed');
+    }
+
+    function showError(msg) {
+      document.getElementById('error-box').classList.remove('hidden');
+      document.getElementById('error-msg').textContent = msg;
+    }
+
+    // History
+    function saveToHistory(jobId, status) {
+      const history = getHistory();
+      const existing = history.findIndex(h => h.job_id === jobId);
+      const entry = { job_id: jobId, status, created_at: new Date().toISOString() };
+      if (existing >= 0) history[existing] = entry;
+      else history.unshift(entry);
+      localStorage.setItem('manhuarecap_history', JSON.stringify(history.slice(0, 50)));
+    }
+
+    function updateHistoryItem(jobId, status) {
+      const history = getHistory();
+      const entry = history.find(h => h.job_id === jobId);
+      if (entry) {
+        entry.status = status;
+        localStorage.setItem('manhuarecap_history', JSON.stringify(history));
+      }
+    }
+
+    function getHistory() {
+      try {
+        return JSON.parse(localStorage.getItem('manhuarecap_history') || '[]');
+      } catch(e) { return []; }
+    }
+
+    function clearHistory() {
+      if (confirm('Clear all history?')) {
+        localStorage.removeItem('manhuarecap_history');
+        renderHistory();
+      }
+    }
+
+    function renderHistory() {
+      const history = getHistory();
+      const container = document.getElementById('history-list');
+      if (!history.length) {
+        container.innerHTML = '<p class="text-slate-500 text-sm">No history yet.</p>';
+        return;
+      }
+      container.innerHTML = history.map(h => {
+        const badge = `<span class="badge badge-${h.status}">${h.status}</span>`;
+        const date = new Date(h.created_at).toLocaleString();
+        const downloads = h.status === 'complete' ? `
+          <div class="flex gap-2 mt-2">
+            <a href="/api/download/${h.job_id}" class="text-xs text-purple-400 hover:text-purple-300">MP4</a>
+            <a href="/api/download/${h.job_id}/srt" class="text-xs text-purple-400 hover:text-purple-300">SRT</a>
+          </div>` : '';
+        return `<div class="history-item">
+          <div>
+            <div class="flex items-center gap-2 mb-1">${badge}<span class="text-xs text-slate-500">${date}</span></div>
+            <p class="text-xs text-slate-500 font-mono">${h.job_id.substring(0, 8)}...</p>
+            ${downloads}
+          </div>
+          <button onclick="loadJob('${h.job_id}')" class="text-xs text-slate-400 hover:text-slate-200">View</button>
+        </div>`;
+      }).join('');
+    }
+
+    async function loadJob(jobId) {
+      switchTab('generate');
+      currentJobId = jobId;
+      document.getElementById('progress-section').classList.remove('hidden');
+      document.getElementById('complete-section').classList.add('hidden');
+      document.getElementById('error-box').classList.add('hidden');
+
+      try {
+        const res = await fetch(`/api/status/${jobId}`);
+        const job = await res.json();
+        updateProgress(job);
+        if (job.status === 'complete') onComplete(job);
+        else if (job.status === 'failed') onFailed(job);
+        else if (job.status === 'processing') startPolling(jobId);
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
+    // Init
+    loadSettings();
+  </script>
+</body>
+</html>
