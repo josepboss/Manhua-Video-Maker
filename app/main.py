@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import json
 import shutil
@@ -227,6 +228,9 @@ def _run_pipeline_sync(job_id: str):
     # ── Stage 1: Panel detection ──────────────────────────────────────────────
     progress(10, "Detecting panels...")
 
+    def natural_sort_key(path):
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", os.path.basename(path))]
+
     image_paths = []
     for path in upload_paths:
         if path.lower().endswith(".pdf"):
@@ -235,6 +239,8 @@ def _run_pipeline_sync(job_id: str):
             image_paths.extend(imgs)
         else:
             image_paths.append(path)
+
+    image_paths.sort(key=natural_sort_key)
 
     panels_out_dir = str(PANELS_DIR / job_id)
     panel_paths = panels_mod.process_images_to_panels(image_paths, panels_out_dir, job_id)
