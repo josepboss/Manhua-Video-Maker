@@ -1,8 +1,24 @@
+import re
 import logging
 import requests
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def split_text(text: str, max_chars: int = 4500) -> list:
+    sentences = re.split(r'(?<=[.،؟!])\s+', text)
+    chunks, current = [], ""
+    for s in sentences:
+        if len(current) + len(s) > max_chars:
+            if current:
+                chunks.append(current.strip())
+            current = s
+        else:
+            current += " " + s
+    if current:
+        chunks.append(current.strip())
+    return chunks
 
 
 def get_azure_voice(settings: dict) -> str:
@@ -106,24 +122,38 @@ def generate_azure_tts(
     token_resp.raise_for_status()
     token = token_resp.text
 
-    ssml = (
-        f"<speak version='1.0' xml:lang='en-US'>"
-        f"<voice name='{voice_name}'>{text}</voice>"
-        f"</speak>"
-    )
+    chunks = split_text(text, max_chars=4500)
+    logger.info(f"Azure TTS: splitting into {len(chunks)} chunk(s)")
 
-    tts_resp = requests.post(
-        f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/ssml+xml",
-            "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3"
-        },
-        data=ssml.encode("utf-8"),
-        timeout=180
-    )
-    tts_resp.raise_for_status()
-    return tts_resp.content
+    audio_parts = []
+    for i, chunk in enumerate(chunks):
+        escaped = (
+            chunk
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+        ssml = (
+            f"<speak version='1.0' xml:lang='ar-SA' xmlns='http://www.w3.org/2001/10/synthesis'>"
+            f"<voice name='{voice_name}'>{escaped}</voice>"
+            f"</speak>"
+        )
+        tts_resp = requests.post(
+            f"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-48khz-192kbitrate-mono-mp3"
+            },
+            data=ssml.encode("utf-8"),
+            timeout=180
+        )
+        tts_resp.raise_for_status()
+        audio_parts.append(tts_resp.content)
+        logger.info(f"Azure TTS: chunk {i + 1}/{len(chunks)} done ({len(chunk)} chars)")
+
+    return b"".join(audio_parts)
 
 
 def estimate_tts_cost(provider: str, char_count: int) -> float:
