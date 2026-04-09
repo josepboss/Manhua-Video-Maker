@@ -291,9 +291,14 @@
         <p class="text-sm text-yellow-300">On first run, PaddleOCR will download its models (~200MB). This may take a minute. Subsequent runs will be faster.</p>
       </div>
 
-      <button id="generate-btn" onclick="startGeneration()" class="btn-primary w-full py-3 text-base">
-        Generate Video
-      </button>
+      <div class="flex gap-3">
+        <button id="generate-btn" onclick="startGeneration()" class="btn-primary flex-1 py-3 text-base">
+          Generate Video
+        </button>
+        <button id="stop-btn" onclick="stopJob()" class="hidden py-3 px-6 rounded-lg font-semibold text-white transition-opacity" style="background:#ef4444;">
+          Stop
+        </button>
+      </div>
 
       <!-- Progress Section -->
       <div id="progress-section" class="card p-6 space-y-5 hidden">
@@ -625,11 +630,13 @@
         if (!processRes.ok) throw new Error('Failed to start processing: ' + await processRes.text());
 
         btn.textContent = 'Processing...';
+        document.getElementById('stop-btn').classList.remove('hidden');
         saveToHistory(job_id, 'processing');
         startPolling(job_id);
       } catch(e) {
         btn.disabled = false;
         btn.textContent = 'Generate Video';
+        document.getElementById('stop-btn').classList.add('hidden');
         showError(e.message);
       }
     }
@@ -650,11 +657,21 @@
         if (job.status === 'complete') {
           clearInterval(pollInterval);
           pollInterval = null;
+          document.getElementById('stop-btn').classList.add('hidden');
           onComplete(job);
         } else if (job.status === 'failed') {
           clearInterval(pollInterval);
           pollInterval = null;
+          document.getElementById('stop-btn').classList.add('hidden');
           onFailed(job);
+        } else if (job.status === 'cancelled') {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          document.getElementById('stop-btn').classList.add('hidden');
+          const btn = document.getElementById('generate-btn');
+          btn.disabled = false;
+          btn.textContent = 'Generate Video';
+          document.getElementById('step-label').textContent = 'Cancelled by user';
         }
       } catch(e) {
         console.error('Poll error:', e);
@@ -811,6 +828,32 @@
       }
     }
 
+    async function stopJob() {
+      if (!currentJobId) return;
+      const btn = document.getElementById('stop-btn');
+      btn.disabled = true;
+      btn.textContent = 'Stopping...';
+      try {
+        const res = await fetch(`/api/cancel/${currentJobId}`, {method: 'POST'});
+        const data = await res.json();
+        if (data.success) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+          btn.classList.add('hidden');
+          btn.disabled = false;
+          btn.textContent = 'Stop';
+          const genBtn = document.getElementById('generate-btn');
+          genBtn.disabled = false;
+          genBtn.textContent = 'Generate Video';
+          document.getElementById('step-label').textContent = 'Cancelled by user';
+        }
+      } catch(e) {
+        btn.disabled = false;
+        btn.textContent = 'Stop';
+        console.error('Cancel error:', e);
+      }
+    }
+
     // Scraper
     async function scrapeChapter() {
       const url = document.getElementById('scraper_url').value.trim();
@@ -869,6 +912,7 @@
       const btn = document.getElementById('generate-btn');
       btn.disabled = true;
       btn.textContent = 'Processing...';
+      document.getElementById('stop-btn').classList.remove('hidden');
 
       try {
         const res = await fetch(`/api/process/${jobId}`, {
