@@ -17,7 +17,10 @@ DEFAULT_SETTINGS = {
     "video_format": "landscape",
     "watermark_text": "ManhuaRecap",
     "ocr_language": "en",
-    "narration_language": "English"
+    "narration_language": "English",
+    "buffer_access_token": "",
+    "buffer_profile_id": "",
+    "buffer_schedule": "queue"
 }
 
 
