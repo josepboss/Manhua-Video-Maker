@@ -250,6 +250,14 @@
     <!-- Generate Tab -->
     <div id="panel-generate" class="hidden space-y-6">
       <div class="card p-6 space-y-4">
+        <div>
+          <label class="label" for="story_context">Story Context <span class="text-slate-500 font-normal">(optional but recommended)</span></label>
+          <textarea id="story_context" rows="4" class="input-field resize-none" placeholder="Example: This is chapter 5 of 'Soul Land'. The main character is Tang San, a genius martial artist. Other characters: Xiao Wu (his partner), Grandmaster (his teacher). Tang San just awakened his second spirit ring..."></textarea>
+          <p class="text-sm text-slate-500 mt-1">Providing character names and context improves narration quality significantly.</p>
+        </div>
+      </div>
+
+      <div class="card p-6 space-y-4">
         <h2 class="text-base font-semibold text-white">Upload Manhua</h2>
         <p class="text-sm text-slate-400">Upload JPG/PNG image files (individual panels or pages) or a single PDF.</p>
         <div id="drop-zone" class="drop-zone flex flex-col items-center justify-center gap-3 py-14 cursor-pointer" onclick="document.getElementById('file-input').click()">
@@ -562,7 +570,12 @@
         currentJobId = job_id;
 
         // Start processing
-        const processRes = await fetch(`/api/process/${job_id}`, { method: 'POST' });
+        const storyContext = document.getElementById('story_context').value.trim();
+        const processRes = await fetch(`/api/process/${job_id}`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ story_context: storyContext })
+        });
         if (!processRes.ok) throw new Error('Failed to start processing: ' + await processRes.text());
 
         btn.textContent = 'Processing...';
