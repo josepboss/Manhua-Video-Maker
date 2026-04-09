@@ -62,7 +62,17 @@ def create_video(
         clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
         clip_paths.append(clip_path)
 
-        vf = build_ken_burns_filter(i, target_w, target_h, duration_per_panel)
+        d = int(duration_per_panel * 25)
+        vf = (
+            f"scale={target_w}:{target_h}:force_original_aspect_ratio=decrease,"
+            f"pad={target_w}:{target_h}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"zoompan=z='min(zoom+0.0015,1.5)'"
+            f":x='iw/2-(iw/zoom/2)'"
+            f":y='ih/2-(ih/zoom/2)'"
+            f":d={d}"
+            f":s={target_w}x{target_h}"
+            f":fps=25"
+        )
 
         cmd = [
             "ffmpeg", "-y",
@@ -73,7 +83,6 @@ def create_video(
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-pix_fmt", "yuv420p",
-            "-r", "24",
             clip_path
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -133,38 +142,3 @@ def create_video(
     return output_path
 
 
-def build_ken_burns_filter(idx: int, w: int, h: int, duration: float) -> str:
-    direction = idx % 4
-    zoom_start = 1.0
-    zoom_end = 1.08
-
-    if direction == 0:
-        x_expr = "0"
-        y_expr = "0"
-    elif direction == 1:
-        x_expr = f"iw-iw/{zoom_end}"
-        y_expr = f"ih-ih/{zoom_end}"
-    elif direction == 2:
-        x_expr = "0"
-        y_expr = f"ih-ih/{zoom_end}"
-    else:
-        x_expr = f"iw-iw/{zoom_end}"
-        y_expr = "0"
-
-    frames = int(duration * 24)
-    zoom_expr = f"if(eq(on,1),{zoom_start},zoom+{(zoom_end-zoom_start)/frames:.6f})"
-
-    scale_and_pad = (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
-    )
-    kenburns = (
-        f"zoompan=z='{zoom_expr}'"
-        f":x='{x_expr}'"
-        f":y='{y_expr}'"
-        f":d={frames}"
-        f":s={w}x{h}"
-        f":fps=24"
-    )
-
-    return scale_and_pad + kenburns
