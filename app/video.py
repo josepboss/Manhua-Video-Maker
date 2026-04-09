@@ -20,7 +20,7 @@ def get_audio_duration(audio_path: str) -> float:
     return 0.0
 
 
-def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape") -> None:
+def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape", on_popen=None) -> None:
     if resolution == "landscape":
         w, h = "1920", "1080"
     else:
@@ -49,9 +49,12 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
         "-pix_fmt", "yuv420p",
         clip_path
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-    if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg clip failed for {panel_path}: {result.stderr[-500:]}")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if on_popen:
+        on_popen(proc)
+    _, stderr = proc.communicate(timeout=120)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg clip failed for {panel_path}: {stderr.decode()[-500:]}")
 
 
 def create_video(
@@ -60,9 +63,14 @@ def create_video(
     output_path: str,
     job_id: str,
     settings: dict,
-    progress_callback=None
+    progress_callback=None,
+    process_registry: dict = None
 ) -> str:
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    def register(proc):
+        if process_registry is not None:
+            process_registry[job_id] = proc
 
     resolution = settings.get("video_format", "landscape")
     watermark_text = settings.get("watermark_text", "ManhuaRecap").replace("'", "")
@@ -97,7 +105,7 @@ def create_video(
         clip_paths.append(clip_path)
 
         try:
-            make_panel_clip(img_path, clip_path, duration_per_panel, resolution)
+            make_panel_clip(img_path, clip_path, duration_per_panel, resolution, on_popen=register)
         except RuntimeError as e:
             logger.error(f"Clip {i} failed: {e}")
             raise
@@ -140,10 +148,14 @@ def create_video(
         "-shortest",
         output_path
     ]
-    result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
-    if result.returncode != 0:
-        logger.error(f"FFmpeg concat failed: {result.stderr}")
-        raise RuntimeError(f"FFmpeg concat failed: {result.stderr[-500:]}")
+    concat_proc = subprocess.Popen(concat_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    register(concat_proc)
+    _, stderr = concat_proc.communicate(timeout=600)
+    if process_registry is not None:
+        process_registry.pop(job_id, None)
+    if concat_proc.returncode != 0:
+        logger.error(f"FFmpeg concat failed: {stderr.decode()}")
+        raise RuntimeError(f"FFmpeg concat failed: {stderr.decode()[-500:]}")
 
     for cp in clip_paths:
         try:
