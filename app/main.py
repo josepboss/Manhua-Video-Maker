@@ -255,10 +255,13 @@ def _run_pipeline_sync(job_id: str):
     update_job_stats(job_id, panels_count=len(panel_paths))
     progress(25, f"Detected {len(panel_paths)} panels. Extracting text...")
 
+    ocr_lang = settings.get("ocr_language", "en")
+    narration_lang = settings.get("narration_language", "English")
+
     # ── Stage 2: OCR ─────────────────────────────────────────────────────────
     panel_data = []
     for i, panel_path in enumerate(panel_paths):
-        text = ocr_mod.extract_text(panel_path)
+        text = ocr_mod.extract_text(panel_path, lang=ocr_lang)
         if not text:
             logger.info(f"Panel {i} returned empty OCR, skipping in narration")
         panel_data.append((panel_path, text))
@@ -282,6 +285,8 @@ def _run_pipeline_sync(job_id: str):
         panel_data,
         openrouter_key,
         openrouter_model,
+        narration_language=narration_lang,
+        ocr_lang=ocr_lang,
         progress_callback=script_progress
     )
 

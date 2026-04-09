@@ -133,6 +133,31 @@
       </div>
 
       <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">Language Settings</h2>
+        <div>
+          <label class="label">Input Language (text language in the manhua)</label>
+          <select id="ocr_language" class="input-field" onchange="onOcrLangChange()">
+            <option value="en">English</option>
+            <option value="ar">Arabic</option>
+            <option value="ch">Chinese</option>
+            <option value="fr">French</option>
+          </select>
+          <p id="language-note" class="text-sm mt-1 text-yellow-400 hidden">
+            ⚠️ Arabic OCR is less accurate than English. Vision fallback is recommended — select a vision-capable model above.
+          </p>
+        </div>
+        <div>
+          <label class="label">Output Narration Language</label>
+          <select id="narration_language" class="input-field">
+            <option value="English">English</option>
+            <option value="Arabic">Arabic</option>
+            <option value="French">French</option>
+            <option value="Chinese">Chinese</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="card p-6 space-y-5">
         <h2 class="text-base font-semibold text-white">TTS Provider</h2>
         <div class="flex gap-3 flex-wrap">
           <label class="radio-option flex-1">
@@ -381,6 +406,13 @@
       badge.className = 'text-sm mt-1 ' + (hasVision ? 'text-green-400' : 'text-yellow-400');
     });
 
+    // OCR language warning
+    function onOcrLangChange() {
+      const lang = document.getElementById('ocr_language').value;
+      const note = document.getElementById('language-note');
+      note.classList.toggle('hidden', lang !== 'ar');
+    }
+
     // TTS provider toggle
     function onTTSChange() {
       const provider = document.querySelector('input[name="tts_provider"]:checked')?.value;
@@ -406,6 +438,9 @@
         document.getElementById('azure_tts_region').value = s.azure_tts_region || '';
         document.getElementById('azure_voice_name').value = s.azure_voice_name || 'en-US-AndrewNeural';
         document.getElementById('watermark_text').value = s.watermark_text || 'ManhuaRecap';
+        document.getElementById('ocr_language').value = s.ocr_language || 'en';
+        document.getElementById('narration_language').value = s.narration_language || 'English';
+        onOcrLangChange();
 
         const ttsProvider = s.tts_provider || 'openai';
         const ttsRadio = document.querySelector(`input[name="tts_provider"][value="${ttsProvider}"]`);
@@ -433,7 +468,9 @@
         azure_tts_region: document.getElementById('azure_tts_region').value,
         azure_voice_name: document.getElementById('azure_voice_name').value,
         video_format: document.querySelector('input[name="video_format"]:checked')?.value || 'landscape',
-        watermark_text: document.getElementById('watermark_text').value
+        watermark_text: document.getElementById('watermark_text').value,
+        ocr_language: document.getElementById('ocr_language').value,
+        narration_language: document.getElementById('narration_language').value
       };
       try {
         const res = await fetch('/api/settings', {

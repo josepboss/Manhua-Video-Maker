@@ -5,6 +5,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def get_azure_voice(settings: dict) -> str:
+    lang = settings.get("narration_language", "English")
+    if lang == "Arabic":
+        return settings.get("azure_voice_name", "ar-SA-HamedNeural")
+    return settings.get("azure_voice_name", "en-US-AndrewNeural")
+
+
 def generate_audio(script: str, job_id: str, settings: dict, audio_dir: str) -> tuple:
     Path(audio_dir).mkdir(parents=True, exist_ok=True)
     output_path = str(Path(audio_dir) / "narration.mp3")
@@ -22,7 +29,7 @@ def generate_audio(script: str, job_id: str, settings: dict, audio_dir: str) -> 
             script,
             settings.get("azure_tts_key", ""),
             settings.get("azure_tts_region", ""),
-            settings.get("azure_voice_name", "en-US-AndrewNeural")
+            get_azure_voice(settings)
         )
     else:
         audio_bytes = generate_openai_tts(

@@ -1,6 +1,6 @@
 {
-  "openrouter_api_key": "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",
-  "openrouter_model": "deepseek/deepseek-v3",
+  "openrouter_api_key": "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",
+  "openrouter_model": "google/gemini-2.0-flash-lite-001",
   "tts_provider": "azure",
   "elevenlabs_api_key": "",
   "elevenlabs_voice_id": "",

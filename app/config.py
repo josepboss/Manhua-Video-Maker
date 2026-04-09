@@ -15,7 +15,9 @@ DEFAULT_SETTINGS = {
     "openai_tts_key": "",
     "openai_tts_voice": "onyx",
     "video_format": "landscape",
-    "watermark_text": "ManhuaRecap"
+    "watermark_text": "ManhuaRecap",
+    "ocr_language": "en",
+    "narration_language": "English"
 }
 
 

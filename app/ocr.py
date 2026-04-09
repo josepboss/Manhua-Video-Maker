@@ -4,23 +4,35 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_ocr_instance = None
+_ocr_instances = {}
+
+LANG_MAP = {
+    "en": "en",
+    "ar": "arabic",
+    "ch": "ch",
+    "fr": "french"
+}
 
 
-def get_ocr():
-    global _ocr_instance
-    if _ocr_instance is None:
-        from paddleocr import PaddleOCR
-        _ocr_instance = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
-    return _ocr_instance
+def get_ocr_instance(lang: str = "en"):
+    from paddleocr import PaddleOCR
+    paddle_lang = LANG_MAP.get(lang, "en")
+    if paddle_lang not in _ocr_instances:
+        logger.info(f"Loading PaddleOCR model for language: {paddle_lang}")
+        _ocr_instances[paddle_lang] = PaddleOCR(
+            use_angle_cls=True,
+            lang=paddle_lang,
+            show_log=False
+        )
+    return _ocr_instances[paddle_lang]
 
 
-def extract_text(image_path: str) -> str:
+def extract_text(image_path: str, lang: str = "en") -> str:
     try:
-        ocr = get_ocr()
+        ocr = get_ocr_instance(lang)
         result = ocr.ocr(image_path, cls=True)
         if not result or not result[0]:
-            logger.info(f"Panel OCR raw result: '' (no result) [{image_path}]")
+            logger.info(f"Panel OCR raw result: '' (no result) [{Path(image_path).name}]")
             return ""
 
         lines = []
