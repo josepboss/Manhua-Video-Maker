@@ -1,11 +1,11 @@
 {
   "openrouter_api_key": "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",
-  "openrouter_model": "openai/gpt-4o-mini",
+  "openrouter_model": "deepseek/deepseek-v3",
   "tts_provider": "azure",
   "elevenlabs_api_key": "",
   "elevenlabs_voice_id": "",
   "azure_tts_key": "5C8Fx45iecO5KsXKoz4VF7B0xhcNisXrWVBTo5cHqwQ2X1tBZZ9wJQQJ99CDACYeBjFXJ3w3AAAYACOGmxli",
-  "azure_tts_region": "",
+  "azure_tts_region": "eastus",
   "azure_voice_name": "en-US-AndrewNeural",
   "openai_tts_key": "",
   "openai_tts_voice": "onyx",

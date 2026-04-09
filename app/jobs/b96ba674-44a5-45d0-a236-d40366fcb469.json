@@ -1,0 +1,43 @@
+{
+  "job_id": "b96ba674-44a5-45d0-a236-d40366fcb469",
+  "status": "failed",
+  "progress": 80,
+  "current_step": "Generating audio narration...",
+  "error_message": "Azure TTS key and region are required",
+  "created_at": "2026-04-09T17:52:14.572246",
+  "upload_paths": [
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/01.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/25.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/14.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/20.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/11.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/22.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/23.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/16.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/12.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/17.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/18.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/19.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/13.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/15.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/10.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/09.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/02.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/06.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/03.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/07.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/21.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/08.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/05.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/04.png",
+    "/home/runner/workspace/app/uploads/b96ba674-44a5-45d0-a236-d40366fcb469/24.png"
+  ],
+  "stats": {
+    "panels_count": 39,
+    "tokens_used": 990762,
+    "tts_chars": 0,
+    "estimated_cost": 0.0,
+    "llm_cost": 0.148614,
+    "tts_cost": 0.0
+  }
+}

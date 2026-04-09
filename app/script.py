@@ -54,7 +54,7 @@ def call_openrouter(system: str, user: str, api_key: str, model: str) -> Tuple[s
     return text, tokens
 
 
-def call_openrouter_vision(image_path: str, api_key: str) -> Tuple[str, int]:
+def call_openrouter_vision(image_path: str, api_key: str, model: str) -> Tuple[str, int]:
     with open(image_path, "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
 
@@ -65,7 +65,7 @@ def call_openrouter_vision(image_path: str, api_key: str) -> Tuple[str, int]:
         "X-Title": "ManhuaRecap"
     }
     payload = {
-        "model": "openai/gpt-4o-mini",
+        "model": model,
         "messages": [
             {"role": "system", "content": NARRATOR_SYSTEM},
             {"role": "user", "content": [
@@ -133,7 +133,7 @@ def generate_script(
         if not text or not text.strip():
             logger.info(f"Panel {i} has no OCR text — using vision fallback")
             try:
-                narration, tokens = call_openrouter_vision(image_path, api_key)
+                narration, tokens = call_openrouter_vision(image_path, api_key, model)
                 total_tokens += tokens
                 if narration:
                     context.update_context(narration[:300])
