@@ -22,17 +22,18 @@ VISION_CAPABLE_MODELS = {
 
 def get_narrator_prompt(language: str = "English", story_context: str = "") -> str:
     if language == "Arabic":
-        context_block = f"\n\nسياق القصة المقدم من المستخدم:\n{story_context}" if story_context else ""
+        context_block = f"\n\nسياق القصة:\n{story_context}" if story_context else ""
         return (
             f"أنت راوٍ محترف لمقاطع ملخصات المانهوا على يوتيوب.{context_block}\n\n"
-            f"مهمتك: تحويل الحوارات والنصوص المستخرجة من لوحات المانهوا إلى سرد قصصي درامي بضمير الغائب.\n"
+            f"مهمتك: تحويل الحوارات والنصوص إلى سرد قصصي درامي بضمير الغائب.\n"
             f"القواعد الصارمة:\n"
             f"- لا تحتفظ بصيغة الحوار أبداً\n"
             f"- لا تستخدم علامات الاقتباس\n"
-            f"- استخدم أسماء الشخصيات من السياق المقدم بدلاً من 'الرجل' أو 'المرأة'\n"
-            f"- اكتب جملاً قصيرة للمشاهد الحركية وجملاً أطول للشرح\n"
-            f"- اجعل الأسلوب درامياً وشيقاً يناسب جمهور يوتيوب\n"
-            f"- اكتب بالعربية الفصحى المبسطة فقط\n"
+            f"- استخدم أسماء الشخصيات من السياق\n"
+            f"- اكتب جملاً قصيرة للمشاهد الحركية\n"
+            f"- اجعل الأسلوب درامياً وشيقاً\n"
+            f"- ضع التشكيل الكامل على جميع الكلمات لضمان النطق الصحيح\n"
+            f"- اكتب بالعربية الفصحى المشكّلة فقط\n"
         )
 
     context_block = f"\n\nStory context:\n{story_context}" if story_context else ""
@@ -53,7 +54,9 @@ def get_merge_prompt(language: str = "English") -> str:
             "خذ سرديات اللوحات المقدمة ودمجها في سكريبت واحد متدفق ومتماسك. "
             "استخدم جملاً قصيرة للمشاهد الحركية وجملاً أطول للشرح والوصف. "
             "الهدف: 700-1700 كلمة تناسب فيديو مدته 5-12 دقيقة. "
-            "اكتب بالعربية الفصحى المبسطة فقط. لا تضف عناوين أو تسميات."
+            "مهم جداً: ضع التشكيل الكامل على جميع الكلمات (الفتحة، الضمة، الكسرة، الشدة، السكون) "
+            "لضمان النطق الصحيح من قبل نظام تحويل النص إلى كلام. "
+            "اكتب بالعربية الفصحى المشكّلة فقط. لا تضف عناوين أو تسميات."
         )
     return (
         f"You are an expert video script editor. Merge panel narrations into one "
@@ -163,6 +166,51 @@ def generate_panel_narration(
             return "", 0
 
 
+def align_story_to_panels(story: str, panel_narrations: List[str]) -> List[str]:
+    n = len(panel_narrations)
+    if n == 0:
+        return []
+    if n == 1:
+        return [story.strip()]
+
+    sentences = re.split(r'(?<=[.!?،؟])\s+', story.strip())
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if not sentences:
+        return list(panel_narrations)
+
+    if len(sentences) <= n:
+        result = []
+        for i in range(n):
+            result.append(sentences[i] if i < len(sentences) else panel_narrations[i])
+        return result
+
+    weights = [max(len(p.split()), 1) for p in panel_narrations]
+    total_weight = sum(weights)
+    total_sents = len(sentences)
+
+    counts = []
+    remaining = total_sents
+    for i in range(n):
+        if i == n - 1:
+            counts.append(max(remaining, 1))
+        else:
+            cnt = max(1, round(weights[i] / total_weight * total_sents))
+            max_cnt = remaining - (n - 1 - i)
+            cnt = min(cnt, max_cnt)
+            counts.append(cnt)
+            remaining -= cnt
+
+    panel_texts = []
+    idx = 0
+    for i, cnt in enumerate(counts):
+        chunk = " ".join(sentences[idx:idx + cnt]).strip()
+        panel_texts.append(chunk if chunk else panel_narrations[i])
+        idx += cnt
+
+    return panel_texts
+
+
 def generate_script(
     panels: List[Tuple[str, str]],
     api_key: str,
@@ -173,9 +221,10 @@ def generate_script(
     manga_title: str = "",
     chapter_number: int = 1,
     progress_callback=None
-) -> Tuple[str, str, dict]:
+) -> Tuple[str, list, list, str, dict]:
     context.reset_context()
     narrations = []
+    narrated_panels = []
     total_tokens = 0
     total_panels = len(panels)
 
@@ -236,6 +285,7 @@ def generate_script(
         if narration:
             context.update_context(narration[:300])
             narrations.append(narration)
+            narrated_panels.append((image_path, text))
 
         if progress_callback:
             pct = int((i + 1) / total_panels * 40)
@@ -269,7 +319,7 @@ def generate_script(
         "estimated_llm_cost": estimated_llm_cost
     }
 
-    return final_script, srt_content, stats
+    return final_script, narrated_panels, narrations, srt_content, stats
 
 
 def generate_srt(script: str) -> str:
