@@ -8,12 +8,22 @@ logger = logging.getLogger(__name__)
 
 def add_arabic_tashkeel(text: str) -> str:
     try:
-        from camel_tools.tagger.default import DefaultTagger
+        from camel_tools.morphology.database import MorphologyDB
+        from camel_tools.morphology.analyzer import Analyzer
 
-        tagger = DefaultTagger.pretrained('calima-msa-r13')
-        result = tagger.tag(text.split())
-        diacritized = ' '.join([t.get('diac', w) for t, w in zip(result, text.split())])
-        return diacritized
+        db = MorphologyDB.builtin_db()
+        analyzer = Analyzer(db)
+
+        words = text.split()
+        result = []
+        for word in words:
+            analyses = analyzer.analyze(word)
+            if analyses:
+                diac = analyses[0].get('diac', word)
+                result.append(diac)
+            else:
+                result.append(word)
+        return ' '.join(result)
     except Exception as e:
         logger.warning(f"Tashkeel failed: {e} — using original text")
         return text
