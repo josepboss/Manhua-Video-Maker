@@ -13,4 +13,3 @@ python-dotenv
 aiofiles
 beautifulsoup4
 lxml
-camel-tools
