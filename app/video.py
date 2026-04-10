@@ -52,13 +52,14 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
 
     logger.info(f"FFmpeg cmd: {' '.join(cmd)}")
 
+    timeout = max(90, int(duration * 5))
     try:
         result = subprocess.run(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=60,
+            timeout=timeout,
             close_fds=True
         )
 
@@ -87,6 +88,7 @@ def create_video(
     output_path: str,
     job_id: str,
     settings: dict,
+    panel_audios: List[str] = None,
     progress_callback=None,
     process_registry: dict = None
 ) -> str:
@@ -104,21 +106,29 @@ def create_video(
     else:
         target_w, target_h = 720, 1280
 
-    selected_panels = [(img, text) for img, text in panels if text and text.strip()]
-    if not selected_panels:
-        selected_panels = panels[:min(len(panels), 20)]
+    if panel_audios:
+        n = min(len(panels), len(panel_audios))
+        selected_panels = panels[:n]
+        panel_audios = panel_audios[:n]
+        durations = [get_audio_duration(a) + 0.2 for a in panel_audios]
+        durations = [max(d, 1.5) for d in durations]
+        logger.info(
+            f"Per-panel audio mode: {n} panels, "
+            f"durations {min(durations):.1f}s–{max(durations):.1f}s"
+        )
+    else:
+        selected_panels = [(img, text) for img, text in panels if text and text.strip()]
+        if not selected_panels:
+            selected_panels = panels[:min(len(panels), 20)]
+        audio_duration = get_audio_duration(audio_path)
+        if audio_duration <= 0:
+            audio_duration = 300.0
+        uniform = max(audio_duration / len(selected_panels), 2.0)
+        durations = [uniform] * len(selected_panels)
+        logger.info(f"Uniform duration mode: {len(selected_panels)} panels, {uniform:.2f}s each")
 
     if not selected_panels:
         raise ValueError("No panels available for video assembly")
-
-    audio_duration = get_audio_duration(audio_path)
-    if audio_duration <= 0:
-        audio_duration = 300.0
-
-    duration_per_panel = audio_duration / len(selected_panels)
-    duration_per_panel = max(duration_per_panel, 2.0)
-
-    logger.info(f"Starting video assembly: {len(selected_panels)} panels, {duration_per_panel:.2f}s each")
 
     if progress_callback:
         progress_callback(0, "Assembling video clips...")
@@ -130,7 +140,7 @@ def create_video(
         clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
         logger.info(f"Processing panel {i+1}/{len(selected_panels)}: {img_path}")
 
-        success = make_panel_clip(img_path, clip_path, duration_per_panel, resolution)
+        success = make_panel_clip(img_path, clip_path, durations[i], resolution)
         if not success:
             logger.warning(f"Skipping failed clip {i+1}/{len(selected_panels)}: {img_path}")
         else:
