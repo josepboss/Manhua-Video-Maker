@@ -4,31 +4,55 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MEMORY_DIR = "app/memory"
-os.makedirs(MEMORY_DIR, exist_ok=True)
+MEMORY_BASE = "app/memory"
+os.makedirs(MEMORY_BASE, exist_ok=True)
 
 
-def get_memory_path(manga_title: str) -> str:
+def _user_memory_dir(user_id: str) -> str:
+    d = os.path.join(MEMORY_BASE, user_id)
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def get_memory_path(manga_title: str, user_id: str = "shared") -> str:
     safe_title = manga_title.replace(" ", "_").replace("/", "-")
-    return os.path.join(MEMORY_DIR, f"{safe_title}.json")
+    return os.path.join(_user_memory_dir(user_id), f"{safe_title}.json")
 
 
-def load_memory(manga_title: str) -> dict:
-    path = get_memory_path(manga_title)
+def load_memory(manga_title: str, user_id: str = "shared") -> dict:
+    path = get_memory_path(manga_title, user_id)
     if not os.path.exists(path):
         return {"manga_title": manga_title, "chapters": {}}
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def save_memory(manga_title: str, memory: dict):
-    path = get_memory_path(manga_title)
+def save_memory(manga_title: str, memory: dict, user_id: str = "shared"):
+    path = get_memory_path(manga_title, user_id)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(memory, f, ensure_ascii=False, indent=2)
 
 
-def get_context_for_chapter(manga_title: str, current_chapter: int) -> str:
-    memory = load_memory(manga_title)
+def list_memories(user_id: str = "shared") -> list:
+    d = _user_memory_dir(user_id)
+    memories = []
+    for fname in os.listdir(d):
+        if fname.endswith(".json"):
+            title = fname[:-5].replace("_", " ")
+            mem = load_memory(title, user_id)
+            chapters = mem.get("chapters", {})
+            memories.append({"manga_title": title, "chapters_count": len(chapters)})
+    return memories
+
+
+def delete_memory(manga_title: str, user_id: str = "shared"):
+    path = get_memory_path(manga_title, user_id)
+    if os.path.exists(path):
+        os.remove(path)
+
+
+def get_context_for_chapter(manga_title: str, current_chapter: int, user_id: str = "shared") -> str:
+    memory = load_memory(manga_title, user_id)
     chapters = memory.get("chapters", {})
 
     if not chapters:
@@ -57,7 +81,8 @@ def get_context_for_chapter(manga_title: str, current_chapter: int) -> str:
     return "\n".join(context_parts)
 
 
-def save_chapter_memory(manga_title: str, chapter_num: int, script: str, api_key: str, model: str):
+def save_chapter_memory(manga_title: str, chapter_num: int, script: str,
+                        api_key: str, model: str, user_id: str = "shared"):
     import requests
 
     prompt = (
@@ -90,22 +115,21 @@ def save_chapter_memory(manga_title: str, chapter_num: int, script: str, api_key
         )
         response.raise_for_status()
         text = response.json()["choices"][0]["message"]["content"].strip()
-
         text = text.replace("```json", "").replace("```", "").strip()
         chapter_data = json.loads(text)
 
-        memory = load_memory(manga_title)
+        memory = load_memory(manga_title, user_id)
         memory["chapters"][str(chapter_num)] = chapter_data
-        save_memory(manga_title, memory)
-        logger.info(f"Memory saved for {manga_title} chapter {chapter_num}")
+        save_memory(manga_title, memory, user_id)
+        logger.info(f"Memory saved for {manga_title} ch{chapter_num} (user={user_id})")
 
     except Exception as e:
         logger.error(f"Failed to save chapter memory: {e}")
-        memory = load_memory(manga_title)
+        memory = load_memory(manga_title, user_id)
         memory["chapters"][str(chapter_num)] = {
             "summary": script[:500],
             "characters": [],
             "key_events": [],
             "cliffhanger": ""
         }
-        save_memory(manga_title, memory)
+        save_memory(manga_title, memory, user_id)
