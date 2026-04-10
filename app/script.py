@@ -4,6 +4,7 @@ import logging
 import re
 from typing import List, Tuple
 from app import context
+from app import memory as memory_module
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,8 @@ def generate_script(
     narration_language: str = "English",
     ocr_lang: str = "en",
     story_context: str = "",
+    manga_title: str = "",
+    chapter_number: int = 1,
     progress_callback=None
 ) -> Tuple[str, str, dict]:
     context.reset_context()
@@ -176,7 +179,20 @@ def generate_script(
     total_tokens = 0
     total_panels = len(panels)
 
-    narrator_system = get_narrator_prompt(narration_language, story_context)
+    # Load memory context from previous chapters
+    chapter_memory_context = ""
+    if manga_title:
+        chapter_memory_context = memory_module.get_context_for_chapter(manga_title, chapter_number)
+        if chapter_memory_context:
+            logger.info(f"Loaded memory context for {manga_title} up to chapter {chapter_number - 1}")
+
+    full_context = ""
+    if chapter_memory_context:
+        full_context += chapter_memory_context + "\n\n"
+    if story_context:
+        full_context += f"=== سياق إضافي من المستخدم ===\n{story_context}"
+
+    narrator_system = get_narrator_prompt(narration_language, full_context)
     merge_system = get_merge_prompt(narration_language)
 
     use_arabic_strategy = (ocr_lang == "ar" and model in VISION_CAPABLE_MODELS)
@@ -242,6 +258,10 @@ def generate_script(
 
     srt_content = generate_srt(final_script)
     estimated_llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
+
+    if manga_title and final_script:
+        memory_module.save_chapter_memory(manga_title, chapter_number, final_script, api_key, model)
+        logger.info(f"Chapter {chapter_number} memory saved for {manga_title}")
 
     stats = {
         "tokens_used": total_tokens,
