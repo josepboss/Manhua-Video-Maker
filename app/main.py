@@ -413,7 +413,7 @@ def _run_pipeline_sync(job_id: str):
     def script_progress(pct: int, step: str):
         progress(40 + pct, step)
 
-    final_script, narrated_panels, panel_narrations, srt_content, llm_stats = script_mod.generate_script(
+    final_script, srt_content, llm_stats = script_mod.generate_script(
         panel_data,
         openrouter_key,
         openrouter_model,
@@ -433,7 +433,7 @@ def _run_pipeline_sync(job_id: str):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    # ── Stage 4: Single TTS for full narration ────────────────────────────────
+    # ── Stage 4: TTS ──────────────────────────────────────────────────────────
     progress(80, "Generating audio narration...")
 
     audio_out_dir = str(AUDIO_DIR / job_id)
@@ -447,25 +447,7 @@ def _run_pipeline_sync(job_id: str):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    # ── Stage 5: Compute panel durations from word-count weights ──────────────
-    panel_texts = script_mod.align_story_to_panels(final_script, panel_narrations)
-    word_counts = [max(len(t.split()), 1) for t in panel_texts]
-    total_words = sum(word_counts)
-    total_duration = video_mod.get_audio_duration(audio_path)
-    if total_duration <= 0:
-        total_duration = 300.0
-
-    panel_durations = [
-        max((wc / total_words) * total_duration + 0.1, 1.5)
-        for wc in word_counts
-    ]
-    logger.info(
-        f"Panel durations: {len(panel_durations)} panels, "
-        f"total audio {total_duration:.1f}s, "
-        f"range {min(panel_durations):.1f}s–{max(panel_durations):.1f}s"
-    )
-
-    # ── Stage 6: Video assembly ───────────────────────────────────────────────
+    # ── Stage 5: Video assembly ───────────────────────────────────────────────
     progress(85, "Assembling video...")
 
     output_out_dir = OUTPUT_DIR / job_id
@@ -480,12 +462,11 @@ def _run_pipeline_sync(job_id: str):
         progress(85 + int(pct * 0.14), step)
 
     video_mod.create_video(
-        narrated_panels,
+        panel_data,
         audio_path,
         video_output,
         job_id,
         settings,
-        panel_durations=panel_durations,
         progress_callback=video_progress,
         process_registry=ffmpeg_processes
     )
