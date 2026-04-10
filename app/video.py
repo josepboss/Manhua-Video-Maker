@@ -52,18 +52,21 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
 
     logger.info(f"FFmpeg cmd: {' '.join(cmd)}")
 
+    clip_timeout = max(120, int(duration * 10))
+
     try:
         result = subprocess.run(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
+            stderr=subprocess.PIPE,
+            timeout=clip_timeout,
             close_fds=True
         )
 
         if result.returncode != 0:
-            logger.error(f"FFmpeg failed (code {result.returncode}): no stderr (redirected to DEVNULL)")
+            err = result.stderr.decode(errors="replace")[-500:]
+            logger.error(f"FFmpeg failed (code {result.returncode}): {err}")
             return False
 
         if not os.path.exists(clip_path):
@@ -74,7 +77,7 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
         return True
 
     except subprocess.TimeoutExpired:
-        logger.error(f"FFmpeg timeout on {panel_path}")
+        logger.error(f"FFmpeg timeout after {clip_timeout}s on {panel_path}")
         return False
     except Exception as e:
         logger.error(f"FFmpeg exception: {e}")
