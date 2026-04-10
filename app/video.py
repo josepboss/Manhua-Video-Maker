@@ -2,13 +2,10 @@ import subprocess
 import logging
 import os
 import json
-import numpy as np
 from pathlib import Path
 from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
-
-MAX_PANELS = 75
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -25,22 +22,19 @@ def get_audio_duration(audio_path: str) -> float:
 
 def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape", on_popen=None) -> None:
     if resolution == "landscape":
-        w, h = 1920, 1080
+        w, h = "1280", "720"
     else:
-        w, h = 1080, 1920
-
-    scaled_w = int(w * 1.2)
-    scaled_h = int(h * 1.2)
-    d = int(duration * 25)
+        w, h = "720", "1280"
 
     vf = (
-        f"scale={scaled_w}:{scaled_h}:force_original_aspect_ratio=increase,"
-        f"crop={w}:{h}:(iw-{w})/2:(ih-{h})/2,"
-        f"zoompan=z='1.2-0.2*on/({d})':"
-        f"x='(iw-iw/zoom)/2':"
-        f"y='(ih-ih/zoom)/2':"
-        f"d={d}:"
-        f"s={w}x{h}:fps=25"
+        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
+        f"zoompan=z='1.2-0.2*on/120'"
+        f":x='(iw-iw/zoom)/2'"
+        f":y='(ih-ih/zoom)/2'"
+        f":d=120"
+        f":s={w}x{h}"
+        f":fps=15"
     )
 
     cmd = [
@@ -51,18 +45,18 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
         "-t", str(duration),
         "-c:v", "libx264",
         "-preset", "ultrafast",
+        "-crf", "30",
         "-tune", "stillimage",
+        "-threads", "1",
         "-pix_fmt", "yuv420p",
         clip_path
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if on_popen:
         on_popen(proc)
-    try:
-        proc.communicate(timeout=60)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        logger.warning(f"FFmpeg timeout — skipping clip {panel_path}")
+    _, stderr = proc.communicate(timeout=300)
+    if proc.returncode != 0:
+        raise RuntimeError(f"FFmpeg clip failed for {panel_path}: {stderr.decode()[-500:]}")
 
 
 def create_video(
@@ -84,9 +78,9 @@ def create_video(
     watermark_text = settings.get("watermark_text", "ManhuaRecap").replace("'", "")
 
     if resolution == "landscape":
-        target_w, target_h = 1920, 1080
+        target_w, target_h = 1280, 720
     else:
-        target_w, target_h = 1080, 1920
+        target_w, target_h = 720, 1280
 
     selected_panels = [(img, text) for img, text in panels if text and text.strip()]
     if not selected_panels:
@@ -94,11 +88,6 @@ def create_video(
 
     if not selected_panels:
         raise ValueError("No panels available for video assembly")
-
-    if len(selected_panels) > MAX_PANELS:
-        indices = np.linspace(0, len(selected_panels) - 1, MAX_PANELS, dtype=int)
-        selected_panels = [selected_panels[i] for i in indices]
-        logger.info(f"Panel count capped to {MAX_PANELS} (evenly sampled)")
 
     audio_duration = get_audio_duration(audio_path)
     if audio_duration <= 0:
@@ -153,11 +142,12 @@ def create_video(
         "-i", audio_path,
         "-vf", drawtext,
         "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
+        "-preset", "ultrafast",
+        "-crf", "28",
+        "-threads", "1",
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", "128k",
         "-shortest",
         output_path
     ]
