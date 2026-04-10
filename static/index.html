@@ -355,6 +355,10 @@
         <div id="error-box" class="hidden rounded-lg p-4" style="background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2);">
           <p class="text-sm text-red-400 font-medium">Error</p>
           <p id="error-msg" class="text-sm text-red-300 mt-1"></p>
+          <p id="retry-stage-msg" class="text-xs text-slate-400 mt-1 italic"></p>
+          <button id="retry-btn" class="hidden mt-3 btn-primary text-sm px-4 py-1.5 rounded-lg" onclick="retryJob()">
+            ↺ Retry from last checkpoint
+          </button>
         </div>
       </div>
 
@@ -714,6 +718,7 @@
           btn.disabled = false;
           btn.textContent = 'Generate Video';
           document.getElementById('step-label').textContent = 'Cancelled by user';
+          showError('Job was cancelled.', job);
         }
       } catch(e) {
         console.error('Poll error:', e);
@@ -780,17 +785,57 @@
       updateHistoryItem(job.job_id, 'complete');
     }
 
+    function getResumeStage(job) {
+      if (!job.panel_paths)  return { stage: 'Panel detection',  label: 'Will restart from the beginning' };
+      if (!job.ocr_results)  return { stage: 'OCR',              label: 'Will resume from text extraction' };
+      if (!job.final_script) return { stage: 'Script generation', label: 'Will resume from script writing' };
+      if (!job.audio_path)   return { stage: 'Audio generation',  label: 'Will resume from TTS audio' };
+      return                         { stage: 'Video assembly',    label: 'Will resume from video rendering' };
+    }
+
     function onFailed(job) {
       const btn = document.getElementById('generate-btn');
       btn.disabled = false;
       btn.textContent = 'Generate Video';
-      showError(job.error_message || 'Unknown error');
+      showError(job.error_message || 'Unknown error', job);
       updateHistoryItem(job.job_id, 'failed');
     }
 
-    function showError(msg) {
+    function showError(msg, job) {
       document.getElementById('error-box').classList.remove('hidden');
       document.getElementById('error-msg').textContent = msg;
+      const retryBtn = document.getElementById('retry-btn');
+      const stageMsg = document.getElementById('retry-stage-msg');
+      if (job && job.job_id) {
+        const { label } = getResumeStage(job);
+        stageMsg.textContent = label;
+        retryBtn.classList.remove('hidden');
+        retryBtn.dataset.jobId = job.job_id;
+      } else {
+        stageMsg.textContent = '';
+        retryBtn.classList.add('hidden');
+      }
+    }
+
+    async function retryJob() {
+      const jobId = document.getElementById('retry-btn').dataset.jobId;
+      if (!jobId) return;
+      document.getElementById('error-box').classList.add('hidden');
+      document.getElementById('retry-btn').classList.add('hidden');
+      document.getElementById('complete-section').classList.add('hidden');
+      document.getElementById('generate-btn').disabled = true;
+      document.getElementById('generate-btn').textContent = 'Processing…';
+      resetSteps();
+      try {
+        const res = await fetch(`/api/retry/${jobId}`, { method: 'POST' });
+        if (!res.ok) throw new Error(await res.text());
+        currentJobId = jobId;
+        startPolling(jobId);
+      } catch(e) {
+        showError('Retry failed: ' + e.message, null);
+        document.getElementById('generate-btn').disabled = false;
+        document.getElementById('generate-btn').textContent = 'Generate Video';
+      }
     }
 
     // History
