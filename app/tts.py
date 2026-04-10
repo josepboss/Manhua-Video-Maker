@@ -82,6 +82,8 @@ def generate_openai_tts(text: str, api_key: str, voice: str = "onyx") -> bytes:
 
 
 def generate_elevenlabs_tts(text: str, api_key: str, voice_id: str) -> bytes:
+    api_key = api_key.strip()
+    voice_id = voice_id.strip()
     if not api_key or not voice_id:
         raise ValueError("ElevenLabs API key and voice ID are required")
     response = requests.post(
@@ -92,7 +94,7 @@ def generate_elevenlabs_tts(text: str, api_key: str, voice_id: str) -> bytes:
         },
         json={
             "text": text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": "eleven_multilingual_v2",
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75
