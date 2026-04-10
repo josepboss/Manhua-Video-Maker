@@ -28,6 +28,60 @@ def get_azure_voice(settings: dict) -> str:
     return settings.get("azure_voice_name", "en-US-AndrewNeural")
 
 
+def generate_audio_per_panel(
+    panel_texts: list,
+    job_id: str,
+    settings: dict,
+    audio_dir: str
+) -> tuple:
+    Path(audio_dir).mkdir(parents=True, exist_ok=True)
+    provider = settings.get("tts_provider", "openai")
+    total_chars = 0
+    panel_audio_paths = []
+    all_bytes = []
+
+    for i, text in enumerate(panel_texts):
+        if not text or not text.strip():
+            text = "..."
+
+        panel_path = str(Path(audio_dir) / f"panel_{i:04d}.mp3")
+
+        if provider == "elevenlabs":
+            audio_bytes = generate_elevenlabs_tts(
+                text,
+                settings.get("elevenlabs_api_key", ""),
+                settings.get("elevenlabs_voice_id", "")
+            )
+        elif provider == "azure":
+            audio_bytes = generate_azure_tts(
+                text,
+                settings.get("azure_tts_key", ""),
+                settings.get("azure_tts_region", ""),
+                get_azure_voice(settings)
+            )
+        else:
+            audio_bytes = generate_openai_tts(
+                text,
+                settings.get("openai_tts_key", ""),
+                settings.get("openai_tts_voice", "onyx")
+            )
+
+        with open(panel_path, "wb") as f:
+            f.write(audio_bytes)
+
+        panel_audio_paths.append(panel_path)
+        all_bytes.append(audio_bytes)
+        total_chars += len(text)
+        logger.info(f"Panel TTS {i+1}/{len(panel_texts)} done ({len(text)} chars)")
+
+    concat_path = str(Path(audio_dir) / "narration.mp3")
+    with open(concat_path, "wb") as f:
+        f.write(b"".join(all_bytes))
+
+    tts_cost = estimate_tts_cost(provider, total_chars)
+    return panel_audio_paths, concat_path, total_chars, tts_cost
+
+
 def generate_audio(script: str, job_id: str, settings: dict, audio_dir: str) -> tuple:
     Path(audio_dir).mkdir(parents=True, exist_ok=True)
     output_path = str(Path(audio_dir) / "narration.mp3")
