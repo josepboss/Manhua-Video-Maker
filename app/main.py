@@ -99,16 +99,22 @@ async def serve_index():
     return JSONResponse({"error": "index.html not found"}, status_code=404)
 
 
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache"
+}
+
+
 @app.get("/api/settings")
 async def api_get_settings():
-    return get_settings()
+    return JSONResponse(content=get_settings(), headers=NO_CACHE_HEADERS)
 
 
 @app.post("/api/settings")
 async def api_save_settings(body: dict):
     try:
         save_settings(body)
-        return {"success": True}
+        return JSONResponse(content={"success": True}, headers=NO_CACHE_HEADERS)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -337,8 +343,6 @@ async def run_pipeline(job_id: str):
 
 
 def _run_pipeline_sync(job_id: str):
-    os.setpgrp()
-
     from app import panels as panels_mod
     from app import ocr as ocr_mod
     from app import script as script_mod
