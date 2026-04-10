@@ -3,21 +3,22 @@ import re
 import uuid
 import json
 import shutil
-import signal
 import logging
 import asyncio
 import psutil
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import get_settings, save_settings
 from app import scraper as scraper_mod
 from app import memory as memory_mod
+from app import auth as auth_mod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,8 +40,12 @@ ffmpeg_processes: dict = {}
 def is_cancelled(job_id: str) -> bool:
     return job_id in cancelled_jobs
 
+
+SESSION_SECRET = os.environ.get("SESSION_SECRET", "manhua-dev-secret-change-me")
+
 app = FastAPI(title="ManhuaRecap")
 
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, session_cookie="mr_session", max_age=60 * 60 * 24 * 30)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -52,6 +57,36 @@ STATIC_DIR = Path(__file__).parent.parent / "static"
 if STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, no-cache, must-revalidate",
+    "Pragma": "no-cache"
+}
+
+
+# ── Auth helpers ──────────────────────────────────────────────────────────────
+
+def get_session_user(request: Request) -> dict | None:
+    user_id = request.session.get("user_id")
+    if not user_id:
+        return None
+    return auth_mod.get_user_by_id(user_id)
+
+
+def require_user(request: Request) -> dict:
+    user = get_session_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
+
+
+def require_admin(request: Request) -> dict:
+    user = require_user(request)
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# ── Job helpers ───────────────────────────────────────────────────────────────
 
 def get_job_path(job_id: str) -> Path:
     return JOBS_DIR / f"{job_id}.json"
@@ -84,34 +119,76 @@ def update_job_stats(job_id: str, **stat_fields) -> None:
     write_job(job)
 
 
+def assert_job_owner(job: dict, user: dict):
+    job_uid = job.get("user_id")
+    if job_uid and job_uid != user["user_id"] and not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+# ── Static / root ─────────────────────────────────────────────────────────────
+
 @app.get("/")
 async def serve_index():
     index_path = STATIC_DIR / "index.html"
     if index_path.exists():
         return FileResponse(
             str(index_path),
-            headers={
-                "Cache-Control": "no-cache, no-store, must-revalidate",
-                "Pragma": "no-cache",
-                "Expires": "0"
-            }
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate",
+                     "Pragma": "no-cache", "Expires": "0"}
         )
     return JSONResponse({"error": "index.html not found"}, status_code=404)
 
 
-NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, no-cache, must-revalidate",
-    "Pragma": "no-cache"
-}
+# ── Auth endpoints ────────────────────────────────────────────────────────────
 
+@app.post("/auth/register")
+async def auth_register(request: Request, body: dict):
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    try:
+        user = auth_mod.create_user(username, password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    request.session["user_id"] = user["user_id"]
+    return JSONResponse(content={"user": user}, headers=NO_CACHE_HEADERS)
+
+
+@app.post("/auth/login")
+async def auth_login(request: Request, body: dict):
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    user = auth_mod.authenticate(username, password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    request.session["user_id"] = user["user_id"]
+    return JSONResponse(content={"user": user}, headers=NO_CACHE_HEADERS)
+
+
+@app.post("/auth/logout")
+async def auth_logout(request: Request):
+    request.session.clear()
+    return JSONResponse(content={"success": True}, headers=NO_CACHE_HEADERS)
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    user = get_session_user(request)
+    if not user:
+        return JSONResponse(content={"user": None}, headers=NO_CACHE_HEADERS)
+    return JSONResponse(content={"user": user}, headers=NO_CACHE_HEADERS)
+
+
+# ── Settings ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings")
-async def api_get_settings():
+async def api_get_settings(request: Request):
+    require_user(request)
     return JSONResponse(content=get_settings(), headers=NO_CACHE_HEADERS)
 
 
 @app.post("/api/settings")
-async def api_save_settings(body: dict):
+async def api_save_settings(request: Request, body: dict):
+    require_admin(request)
     try:
         strip_fields = [
             "openrouter_api_key", "elevenlabs_api_key", "elevenlabs_voice_id",
@@ -127,8 +204,11 @@ async def api_save_settings(body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Upload & process ──────────────────────────────────────────────────────────
+
 @app.post("/api/upload")
-async def api_upload(files: list[UploadFile] = File(...)):
+async def api_upload(request: Request, files: list[UploadFile] = File(...)):
+    user = require_user(request)
     job_id = str(uuid.uuid4())
     job_upload_dir = UPLOADS_DIR / job_id
     job_upload_dir.mkdir(parents=True, exist_ok=True)
@@ -144,6 +224,8 @@ async def api_upload(files: list[UploadFile] = File(...)):
 
     job = {
         "job_id": job_id,
+        "user_id": user["user_id"],
+        "username": user["username"],
         "status": "queued",
         "progress": 0,
         "current_step": "Uploaded",
@@ -151,12 +233,8 @@ async def api_upload(files: list[UploadFile] = File(...)):
         "created_at": datetime.utcnow().isoformat(),
         "upload_paths": saved_paths,
         "stats": {
-            "panels_count": 0,
-            "tokens_used": 0,
-            "tts_chars": 0,
-            "estimated_cost": 0.0,
-            "llm_cost": 0.0,
-            "tts_cost": 0.0
+            "panels_count": 0, "tokens_used": 0, "tts_chars": 0,
+            "estimated_cost": 0.0, "llm_cost": 0.0, "tts_cost": 0.0
         }
     }
     write_job(job)
@@ -164,8 +242,10 @@ async def api_upload(files: list[UploadFile] = File(...)):
 
 
 @app.post("/api/process/{job_id}")
-async def api_process(job_id: str, background_tasks: BackgroundTasks, body: dict = None):
+async def api_process(request: Request, job_id: str, background_tasks: BackgroundTasks, body: dict = None):
+    user = require_user(request)
     job = read_job(job_id)
+    assert_job_owner(job, user)
     if job["status"] not in ["queued", "failed"]:
         raise HTTPException(status_code=400, detail="Job already processing or complete")
     story_context = (body or {}).get("story_context", "")
@@ -185,69 +265,70 @@ async def api_process(job_id: str, background_tasks: BackgroundTasks, body: dict
 
 
 @app.get("/api/status/{job_id}")
-async def api_status(job_id: str):
-    return read_job(job_id)
+async def api_status(request: Request, job_id: str):
+    user = require_user(request)
+    job = read_job(job_id)
+    assert_job_owner(job, user)
+    return job
 
 
 @app.get("/api/download/{job_id}")
-async def api_download_video(job_id: str):
+async def api_download_video(request: Request, job_id: str):
+    user = require_user(request)
     job = read_job(job_id)
+    assert_job_owner(job, user)
     if job["status"] != "complete":
         raise HTTPException(status_code=400, detail="Job not complete")
     video_path = OUTPUT_DIR / job_id / "final.mp4"
     if not video_path.exists():
         raise HTTPException(status_code=404, detail="Video file not found")
-    return FileResponse(
-        str(video_path),
-        media_type="video/mp4",
-        filename=f"manhuarecap_{job_id[:8]}.mp4"
-    )
+    return FileResponse(str(video_path), media_type="video/mp4",
+                        filename=f"manhuarecap_{job_id[:8]}.mp4")
 
 
 @app.get("/api/download/{job_id}/srt")
-async def api_download_srt(job_id: str):
+async def api_download_srt(request: Request, job_id: str):
+    user = require_user(request)
     job = read_job(job_id)
+    assert_job_owner(job, user)
     if job["status"] != "complete":
         raise HTTPException(status_code=400, detail="Job not complete")
     srt_path = OUTPUT_DIR / job_id / "subtitles.srt"
     if not srt_path.exists():
         raise HTTPException(status_code=404, detail="SRT file not found")
-    return FileResponse(
-        str(srt_path),
-        media_type="text/plain",
-        filename=f"manhuarecap_{job_id[:8]}.srt"
-    )
+    return FileResponse(str(srt_path), media_type="text/plain",
+                        filename=f"manhuarecap_{job_id[:8]}.srt")
 
 
 @app.get("/api/debug/{job_id}")
-async def api_debug_job(job_id: str):
+async def api_debug_job(request: Request, job_id: str):
+    require_admin(request)
     from app.ocr import extract_text
     panels_dir = PANELS_DIR / job_id
-    ocr_results = []
-    if panels_dir.exists():
-        for fname in sorted(panels_dir.iterdir()):
-            if fname.suffix.lower() == ".png":
-                text = extract_text(str(fname))
-                ocr_results.append({"panel": fname.name, "text": text or "(empty)"})
-    else:
+    if not panels_dir.exists():
         return {"error": f"No panels directory found for job {job_id}", "ocr_results": []}
+    ocr_results = []
+    for fname in sorted(panels_dir.iterdir()):
+        if fname.suffix.lower() == ".png":
+            text = extract_text(str(fname))
+            ocr_results.append({"panel": fname.name, "text": text or "(empty)"})
     return {"job_id": job_id, "panel_count": len(ocr_results), "ocr_results": ocr_results}
 
 
 @app.post("/api/scraper/fetch")
-async def scraper_fetch(body: dict):
+async def scraper_fetch(request: Request, body: dict):
+    user = require_user(request)
     url = body.get("url", "").strip()
     selector = body.get("selector", "").strip()
-
     if not url:
         return {"success": False, "error": "URL is required"}
-
     result = scraper_mod.fetch_chapter(url, selector)
-
     if result["success"]:
         job_id = result["job_id"]
         job = {
             "job_id": job_id,
+            "user_id": user["user_id"],
+            "username": user["username"],
             "status": "queued",
             "progress": 0,
             "current_step": "Images scraped and ready",
@@ -256,21 +337,19 @@ async def scraper_fetch(body: dict):
             "upload_paths": result["image_paths"],
             "source_url": url,
             "stats": {
-                "panels_count": 0,
-                "tokens_used": 0,
-                "tts_chars": 0,
-                "estimated_cost": 0.0,
-                "llm_cost": 0.0,
-                "tts_cost": 0.0
+                "panels_count": 0, "tokens_used": 0, "tts_chars": 0,
+                "estimated_cost": 0.0, "llm_cost": 0.0, "tts_cost": 0.0
             }
         }
         write_job(job)
-
     return result
 
 
 @app.post("/api/cancel/{job_id}")
-async def cancel_job(job_id: str):
+async def cancel_job(request: Request, job_id: str):
+    user = require_user(request)
+    job = read_job(job_id)
+    assert_job_owner(job, user)
     cancelled_jobs.add(job_id)
     if job_id in ffmpeg_processes:
         proc = ffmpeg_processes[job_id]
@@ -295,8 +374,10 @@ async def cancel_job(job_id: str):
 
 
 @app.post("/api/retry/{job_id}")
-async def api_retry(job_id: str, background_tasks: BackgroundTasks):
+async def api_retry(request: Request, job_id: str, background_tasks: BackgroundTasks):
+    user = require_user(request)
     job = read_job(job_id)
+    assert_job_owner(job, user)
     if job["status"] not in ["failed", "cancelled"]:
         raise HTTPException(status_code=400, detail="Job is not in a failed or cancelled state")
     cancelled_jobs.discard(job_id)
@@ -306,22 +387,18 @@ async def api_retry(job_id: str, background_tasks: BackgroundTasks):
     return {"job_id": job_id, "status": "processing"}
 
 
+# ── Memory ────────────────────────────────────────────────────────────────────
+
 @app.get("/api/memory")
-async def list_all_memory():
-    memories = []
-    if os.path.exists("app/memory"):
-        for f in os.listdir("app/memory"):
-            if f.endswith(".json"):
-                title = f.replace(".json", "").replace("_", " ")
-                mem = memory_mod.load_memory(title)
-                chapters = mem.get("chapters", {})
-                memories.append({"title": title, "chapters_count": len(chapters)})
-    return {"memories": memories}
+async def list_all_memory(request: Request):
+    user = require_user(request)
+    return {"memories": memory_mod.list_memories(user["user_id"])}
 
 
 @app.get("/api/memory/{manga_title}")
-async def get_manga_memory(manga_title: str):
-    mem = memory_mod.load_memory(manga_title)
+async def get_manga_memory(request: Request, manga_title: str):
+    user = require_user(request)
+    mem = memory_mod.load_memory(manga_title, user["user_id"])
     chapters = mem.get("chapters", {})
     return {
         "manga_title": manga_title,
@@ -332,21 +409,96 @@ async def get_manga_memory(manga_title: str):
 
 
 @app.delete("/api/memory/{manga_title}")
-async def delete_manga_memory(manga_title: str):
-    path = memory_mod.get_memory_path(manga_title)
-    if os.path.exists(path):
-        os.remove(path)
+async def delete_manga_memory(request: Request, manga_title: str):
+    user = require_user(request)
+    memory_mod.delete_memory(manga_title, user["user_id"])
     return {"success": True}
 
 
+# ── Jobs list ─────────────────────────────────────────────────────────────────
+
 @app.get("/api/jobs")
-async def api_list_jobs():
+async def api_list_jobs(request: Request):
+    user = require_user(request)
     jobs = []
     for jf in sorted(JOBS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         with open(jf) as f:
-            jobs.append(json.load(f))
+            job = json.load(f)
+        if user.get("is_admin") or job.get("user_id") == user["user_id"] or not job.get("user_id"):
+            jobs.append(job)
     return {"jobs": jobs}
 
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@app.get("/api/admin/users")
+async def admin_list_users(request: Request):
+    require_admin(request)
+    users = auth_mod.get_all_users()
+    for u in users:
+        uid = u["user_id"]
+        job_files = list(JOBS_DIR.glob("*.json"))
+        user_jobs = []
+        for jf in job_files:
+            with open(jf) as f:
+                try:
+                    j = json.load(f)
+                except Exception:
+                    continue
+            if j.get("user_id") == uid:
+                user_jobs.append(j)
+        u["jobs_total"] = len(user_jobs)
+        u["jobs_complete"] = sum(1 for j in user_jobs if j.get("status") == "complete")
+        u["jobs_failed"] = sum(1 for j in user_jobs if j.get("status") == "failed")
+        total_cost = sum(j.get("stats", {}).get("estimated_cost", 0) for j in user_jobs)
+        u["total_cost"] = round(total_cost, 4)
+    return {"users": users}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(request: Request, user_id: str):
+    admin = require_admin(request)
+    if user_id == admin["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    auth_mod.delete_user(user_id)
+    return {"success": True}
+
+
+@app.post("/api/admin/users/{user_id}/toggle-admin")
+async def admin_toggle_admin(request: Request, user_id: str):
+    admin = require_admin(request)
+    if user_id == admin["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot change your own admin status")
+    target = auth_mod.get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    auth_mod.set_admin(user_id, not target.get("is_admin", False))
+    return {"success": True, "is_admin": not target.get("is_admin", False)}
+
+
+@app.get("/api/admin/stats")
+async def admin_stats(request: Request):
+    require_admin(request)
+    all_jobs = []
+    for jf in JOBS_DIR.glob("*.json"):
+        with open(jf) as f:
+            try:
+                all_jobs.append(json.load(f))
+            except Exception:
+                pass
+    users = auth_mod.get_all_users()
+    return {
+        "total_users": len(users),
+        "total_jobs": len(all_jobs),
+        "jobs_complete": sum(1 for j in all_jobs if j.get("status") == "complete"),
+        "jobs_failed": sum(1 for j in all_jobs if j.get("status") == "failed"),
+        "jobs_processing": sum(1 for j in all_jobs if j.get("status") == "processing"),
+        "total_cost": round(sum(j.get("stats", {}).get("estimated_cost", 0) for j in all_jobs), 4),
+        "total_panels": sum(j.get("stats", {}).get("panels_count", 0) for j in all_jobs),
+    }
+
+
+# ── Pipeline ──────────────────────────────────────────────────────────────────
 
 async def run_pipeline(job_id: str):
     try:
@@ -374,6 +526,7 @@ def _run_pipeline_sync(job_id: str):
     settings = get_settings()
     job = read_job(job_id)
     upload_paths = job.get("upload_paths", [])
+    user_id = job.get("user_id", "shared")
 
     def progress(pct: int, step: str):
         update_job(job_id, progress=pct, current_step=step)
@@ -441,6 +594,11 @@ def _run_pipeline_sync(job_id: str):
         manga_title = job.get("manga_title", "")
         chapter_number = int(job.get("chapter_number", 1) or 1)
 
+        if manga_title and chapter_number > 1:
+            mem_ctx = memory_mod.get_context_for_chapter(manga_title, chapter_number, user_id)
+            if mem_ctx:
+                story_context = mem_ctx + ("\n\n" + story_context if story_context else "")
+
         def script_progress(pct: int, step: str):
             progress(40 + pct, step)
 
@@ -459,6 +617,10 @@ def _run_pipeline_sync(job_id: str):
         llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
         update_job_stats(job_id, tokens_used=total_tokens, llm_cost=llm_cost)
         update_job(job_id, final_script=final_script, srt_content=srt_content, llm_stats=llm_stats)
+
+        if manga_title and chapter_number:
+            memory_mod.save_chapter_memory(manga_title, chapter_number, final_script,
+                                           openrouter_key, openrouter_model, user_id)
     else:
         final_script = job["final_script"]
         srt_content = job.get("srt_content", "")
@@ -502,55 +664,33 @@ def _run_pipeline_sync(job_id: str):
         progress(85 + int(pct * 0.14), step)
 
     video_mod.create_video(
-        panel_data,
-        audio_path,
-        video_output,
-        job_id,
-        settings,
-        progress_callback=video_progress,
-        process_registry=ffmpeg_processes
+        panel_data, audio_path, video_output, job_id, settings,
+        progress_callback=video_progress, process_registry=ffmpeg_processes
     )
 
     # ── Final stats ───────────────────────────────────────────────────────────
     tts_chars_final = len(final_script)
     estimated_cost = round(
-        (total_tokens / 1_000_000 * 0.15) + (tts_chars_final / 1_000_000 * 15),
-        6
+        (total_tokens / 1_000_000 * 0.15) + (tts_chars_final / 1_000_000 * 15), 6
     )
 
     update_job_stats(
         job_id,
         panels_count=llm_stats.get("panels_count", len(panel_data)),
-        tokens_used=total_tokens,
-        tts_chars=tts_chars_final,
-        estimated_cost=estimated_cost,
-        llm_cost=llm_cost,
-        tts_cost=tts_cost
+        tokens_used=total_tokens, tts_chars=tts_chars_final,
+        estimated_cost=estimated_cost, llm_cost=llm_cost, tts_cost=tts_cost
     )
-
-    update_job(
-        job_id,
-        status="complete",
-        progress=100,
-        current_step="Complete!"
-    )
-
+    update_job(job_id, status="complete", progress=100, current_step="Complete!")
     _cleanup_job(job_id)
 
 
 def _cleanup_job(job_id: str):
-    try:
-        job_upload_dir = UPLOADS_DIR / job_id
-        if job_upload_dir.exists():
-            shutil.rmtree(str(job_upload_dir))
-    except Exception as e:
-        logger.warning(f"Cleanup uploads failed: {e}")
-    try:
-        panels_job_dir = PANELS_DIR / job_id
-        if panels_job_dir.exists():
-            shutil.rmtree(str(panels_job_dir))
-    except Exception as e:
-        logger.warning(f"Cleanup panels failed: {e}")
+    for d, label in [(UPLOADS_DIR / job_id, "uploads"), (PANELS_DIR / job_id, "panels")]:
+        try:
+            if d.exists():
+                shutil.rmtree(str(d))
+        except Exception as e:
+            logger.warning(f"Cleanup {label} failed: {e}")
 
 
 if __name__ == "__main__":
