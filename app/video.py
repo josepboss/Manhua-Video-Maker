@@ -50,24 +50,29 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
         clip_path
     ]
 
-    timeout = max(90, int(duration * 5))
+    logger.info(f"FFmpeg cmd: {' '.join(cmd)}")
+
     try:
         result = subprocess.run(
             cmd,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            timeout=timeout,
+            timeout=60,
             close_fds=True
         )
+
         if result.returncode != 0:
-            logger.error(f"FFmpeg failed (code {result.returncode})")
+            logger.error(f"FFmpeg failed (code {result.returncode}): no stderr (redirected to DEVNULL)")
             return False
+
         if not os.path.exists(clip_path):
             logger.error(f"Clip not found after FFmpeg: {clip_path}")
             return False
+
         logger.info(f"Clip done: {clip_path}")
         return True
+
     except subprocess.TimeoutExpired:
         logger.error(f"FFmpeg timeout on {panel_path}")
         return False
@@ -82,7 +87,6 @@ def create_video(
     output_path: str,
     job_id: str,
     settings: dict,
-    panel_durations: List[float] = None,
     progress_callback=None,
     process_registry: dict = None
 ) -> str:
@@ -96,88 +100,57 @@ def create_video(
     watermark_text = settings.get("watermark_text", "ManhuaRecap").replace("'", "")
 
     if resolution == "landscape":
-        w, h = 1280, 720
+        target_w, target_h = 1280, 720
     else:
-        w, h = 720, 1280
+        target_w, target_h = 720, 1280
 
-    if panel_durations:
-        n = min(len(panels), len(panel_durations))
-        selected_panels = panels[:n]
-        durations = panel_durations[:n]
-        logger.info(
-            f"Timed mode: {n} panels, "
-            f"durations {min(durations):.1f}s–{max(durations):.1f}s"
-        )
-    else:
-        selected_panels = [(img, text) for img, text in panels if text and text.strip()]
-        if not selected_panels:
-            selected_panels = panels[:min(len(panels), 20)]
-        audio_duration = get_audio_duration(audio_path)
-        if audio_duration <= 0:
-            audio_duration = 300.0
-        uniform = max(audio_duration / len(selected_panels), 2.0)
-        durations = [uniform] * len(selected_panels)
-        logger.info(f"Uniform mode: {len(selected_panels)} panels, {uniform:.2f}s each")
+    selected_panels = [(img, text) for img, text in panels if text and text.strip()]
+    if not selected_panels:
+        selected_panels = panels[:min(len(panels), 20)]
 
     if not selected_panels:
         raise ValueError("No panels available for video assembly")
 
-    if progress_callback:
-        progress_callback(0, "Encoding panel clips...")
+    audio_duration = get_audio_duration(audio_path)
+    if audio_duration <= 0:
+        audio_duration = 300.0
 
-    work_dir = Path(output_path).parent
-    concat_list_path = str(work_dir / "concat_list.txt")
-    temp_video_path = str(work_dir / "temp_video.mp4")
+    duration_per_panel = audio_duration / len(selected_panels)
+    duration_per_panel = max(duration_per_panel, 2.0)
+
+    logger.info(f"Starting video assembly: {len(selected_panels)} panels, {duration_per_panel:.2f}s each")
+
+    if progress_callback:
+        progress_callback(0, "Assembling video clips...")
+
+    concat_list_path = str(Path(output_path).parent / "concat_list.txt")
     clip_paths = []
 
-    # ── Step 1: encode each panel as a silent video clip ─────────────────────
     for i, (img_path, _) in enumerate(selected_panels):
-        clip_path = str(work_dir / f"clip_{i:04d}.mp4")
-        logger.info(f"Panel {i+1}/{len(selected_panels)}: {img_path}")
+        clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
+        logger.info(f"Processing panel {i+1}/{len(selected_panels)}: {img_path}")
 
-        if make_panel_clip(img_path, clip_path, durations[i], resolution):
-            clip_paths.append(clip_path)
+        success = make_panel_clip(img_path, clip_path, duration_per_panel, resolution)
+        if not success:
+            logger.warning(f"Skipping failed clip {i+1}/{len(selected_panels)}: {img_path}")
         else:
-            logger.warning(f"Skipping failed clip {i+1}")
+            clip_paths.append(clip_path)
 
         if progress_callback:
-            pct = int((i + 1) / len(selected_panels) * 75)
+            pct = int((i + 1) / len(selected_panels) * 80)
             progress_callback(pct, f"Encoding clip {i+1}/{len(selected_panels)}...")
 
     if not clip_paths:
         raise RuntimeError("All panel clips failed — nothing to concatenate")
 
-    logger.info(f"Clips done: {len(clip_paths)}/{len(selected_panels)}")
-
-    # ── Step 2: concatenate clips into silent temp video ──────────────────────
-    if progress_callback:
-        progress_callback(78, "Concatenating clips...")
+    logger.info(f"All clips done ({len(clip_paths)}/{len(selected_panels)} succeeded) — starting concat")
 
     with open(concat_list_path, "w") as f:
         for cp in clip_paths:
             f.write(f"file '{cp}'\n")
 
-    concat_result = subprocess.run(
-        [
-            "ffmpeg", "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_list_path,
-            "-c", "copy",
-            temp_video_path
-        ],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=300,
-        close_fds=True
-    )
-    if concat_result.returncode != 0:
-        raise RuntimeError("FFmpeg concat of panel clips failed")
-
-    # ── Step 3: mux temp video + narration audio → final with watermark ───────
     if progress_callback:
-        progress_callback(85, "Muxing audio and adding watermark...")
+        progress_callback(85, "Concatenating clips and adding audio...")
 
     drawtext = (
         f"drawtext=text='{watermark_text}'"
@@ -190,9 +163,11 @@ def create_video(
         f":shadowx=2:shadowy=2"
     )
 
-    mux_cmd = [
+    concat_cmd = [
         "ffmpeg", "-y",
-        "-i", temp_video_path,
+        "-f", "concat",
+        "-safe", "0",
+        "-i", concat_list_path,
         "-i", audio_path,
         "-vf", drawtext,
         "-c:v", "libx264",
@@ -205,33 +180,23 @@ def create_video(
         "-shortest",
         output_path
     ]
-
-    mux_proc = subprocess.Popen(
-        mux_cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        stdin=subprocess.DEVNULL,
-        close_fds=True
-    )
-    register(mux_proc)
-    _, stderr = mux_proc.communicate(timeout=600)
+    concat_proc = subprocess.Popen(concat_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    register(concat_proc)
+    _, stderr = concat_proc.communicate(timeout=600)
     if process_registry is not None:
         process_registry.pop(job_id, None)
+    if concat_proc.returncode != 0:
+        logger.error(f"FFmpeg concat failed: {stderr.decode()}")
+        raise RuntimeError(f"FFmpeg concat failed: {stderr.decode()[-500:]}")
 
-    if mux_proc.returncode != 0:
-        logger.error(f"FFmpeg mux failed: {stderr.decode()[-500:]}")
-        raise RuntimeError(f"FFmpeg mux failed: {stderr.decode()[-500:]}")
-
-    # ── Cleanup ───────────────────────────────────────────────────────────────
     for cp in clip_paths:
         try:
             os.unlink(cp)
         except Exception:
             pass
-    for tmp in [concat_list_path, temp_video_path]:
-        try:
-            os.unlink(tmp)
-        except Exception:
-            pass
+    try:
+        os.unlink(concat_list_path)
+    except Exception:
+        pass
 
     return output_path
