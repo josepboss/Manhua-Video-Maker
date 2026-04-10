@@ -1,4 +1,5 @@
 import re
+import subprocess
 import logging
 import requests
 from pathlib import Path
@@ -38,7 +39,6 @@ def generate_audio_per_panel(
     provider = settings.get("tts_provider", "openai")
     total_chars = 0
     panel_audio_paths = []
-    all_bytes = []
 
     for i, text in enumerate(panel_texts):
         if not text or not text.strip():
@@ -70,13 +70,37 @@ def generate_audio_per_panel(
             f.write(audio_bytes)
 
         panel_audio_paths.append(panel_path)
-        all_bytes.append(audio_bytes)
         total_chars += len(text)
         logger.info(f"Panel TTS {i+1}/{len(panel_texts)} done ({len(text)} chars)")
 
     concat_path = str(Path(audio_dir) / "narration.mp3")
-    with open(concat_path, "wb") as f:
-        f.write(b"".join(all_bytes))
+    list_path = str(Path(audio_dir) / "concat_list.txt")
+    with open(list_path, "w") as f:
+        for p in panel_audio_paths:
+            f.write(f"file '{p}'\n")
+
+    result = subprocess.run(
+        [
+            "ffmpeg", "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", list_path,
+            "-c", "copy",
+            concat_path
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=300,
+        close_fds=True
+    )
+    if result.returncode != 0:
+        raise RuntimeError("FFmpeg failed to concatenate panel audio files")
+
+    try:
+        Path(list_path).unlink()
+    except Exception:
+        pass
 
     tts_cost = estimate_tts_cost(provider, total_chars)
     return panel_audio_paths, concat_path, total_chars, tts_cost
