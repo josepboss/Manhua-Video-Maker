@@ -313,28 +313,6 @@ async def delete_manga_memory(manga_title: str):
     return {"success": True}
 
 
-@app.post("/api/tts/test-voice")
-async def test_voice():
-    settings = get_settings()
-    provider = settings.get("tts_provider", "openai")
-
-    if provider != "azure":
-        return {"success": True, "message": "Non-Azure provider selected"}
-
-    api_key = settings.get("azure_tts_key", "")
-    region = settings.get("azure_tts_region", "")
-    voice_name = settings.get("azure_voice_name", "")
-
-    try:
-        from app.tts import generate_azure_tts
-        test_audio = generate_azure_tts("مرحبا", api_key, region, voice_name)
-        if test_audio and len(test_audio) > 100:
-            return {"success": True, "message": f"Voice {voice_name} is working"}
-        return {"success": False, "error": "No audio returned"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
 @app.get("/api/jobs")
 async def api_list_jobs():
     jobs = []
@@ -373,23 +351,6 @@ def _run_pipeline_sync(job_id: str):
 
     def progress(pct: int, step: str):
         update_job(job_id, progress=pct, current_step=step)
-
-    # ── Step 0: Validate TTS voice ────────────────────────────────────────────
-    if settings.get("tts_provider") == "azure":
-        try:
-            from app.tts import generate_azure_tts
-            test = generate_azure_tts(
-                "test",
-                settings.get("azure_tts_key"),
-                settings.get("azure_tts_region"),
-                settings.get("azure_voice_name", "ar-SA-HamedNeural")
-            )
-            if not test or len(test) < 100:
-                raise ValueError("Voice test returned empty audio")
-        except Exception as e:
-            update_job(job_id, status="failed",
-                       error_message=f"❌ TTS Voice Error: {str(e)} — Please fix voice settings and try again")
-            return
 
     # ── Stage 1: Panel detection ──────────────────────────────────────────────
     progress(10, "Detecting panels...")
@@ -476,19 +437,9 @@ def _run_pipeline_sync(job_id: str):
     progress(80, "Generating audio narration...")
 
     audio_out_dir = str(AUDIO_DIR / job_id)
-    try:
-        audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
-            final_script, job_id, settings, audio_out_dir
-        )
-    except Exception as e:
-        error_msg = str(e)
-        if "Unsupported voice" in error_msg or "Voice" in error_msg or "voice" in error_msg:
-            error_msg = (
-                f"❌ Invalid voice name: {error_msg}\n"
-                f"→ Go to Settings, fix the Voice Name, then click Generate again to resume from audio step."
-            )
-        update_job(job_id, status="failed", error_message=error_msg)
-        return
+    audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
+        final_script, job_id, settings, audio_out_dir
+    )
 
     update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
 
