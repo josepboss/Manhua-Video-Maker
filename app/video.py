@@ -55,15 +55,13 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
     try:
         result = subprocess.run(
             cmd,
-            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=60,
-            close_fds=True
+            stderr=subprocess.PIPE,
+            timeout=60
         )
 
         if result.returncode != 0:
-            logger.error(f"FFmpeg failed (code {result.returncode}): no stderr (redirected to DEVNULL)")
+            logger.error(f"FFmpeg failed (code {result.returncode}): {result.stderr.decode()[-500:]}")
             return False
 
         if not os.path.exists(clip_path):
