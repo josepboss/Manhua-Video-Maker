@@ -94,7 +94,7 @@ def generate_elevenlabs_tts(text: str, api_key: str, voice_id: str) -> bytes:
         },
         json={
             "text": text,
-            "model_id": "eleven_multilingual_v2",
+            "model_id": "eleven_turbo_v2_5",
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75
