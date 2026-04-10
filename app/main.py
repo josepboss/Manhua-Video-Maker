@@ -113,6 +113,14 @@ async def api_get_settings():
 @app.post("/api/settings")
 async def api_save_settings(body: dict):
     try:
+        strip_fields = [
+            "openrouter_api_key", "elevenlabs_api_key", "elevenlabs_voice_id",
+            "azure_tts_key", "azure_tts_region", "azure_voice_name",
+            "openai_tts_key", "openai_tts_voice", "watermark_text",
+        ]
+        for field in strip_fields:
+            if field in body and isinstance(body[field], str):
+                body[field] = body[field].strip()
         save_settings(body)
         return JSONResponse(content={"success": True}, headers=NO_CACHE_HEADERS)
     except Exception as e:
