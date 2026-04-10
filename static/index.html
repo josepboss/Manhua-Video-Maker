@@ -217,10 +217,6 @@
           <div>
             <label class="label">Voice Name</label>
             <input type="text" id="azure_voice_name" placeholder="en-US-AndrewNeural" class="input-field" />
-            <div class="flex items-center gap-3 mt-2">
-              <button onclick="testVoice()" id="test-voice-btn" class="btn-secondary text-sm px-4 py-2">🔊 Test Voice</button>
-              <p id="voice-test-result" class="text-sm"></p>
-            </div>
           </div>
         </div>
       </div>
@@ -511,31 +507,6 @@
       document.getElementById('tts-openai').classList.toggle('hidden', provider !== 'openai');
       document.getElementById('tts-elevenlabs').classList.toggle('hidden', provider !== 'elevenlabs');
       document.getElementById('tts-azure').classList.toggle('hidden', provider !== 'azure');
-    }
-
-    async function testVoice() {
-      const btn = document.getElementById('test-voice-btn');
-      const el = document.getElementById('voice-test-result');
-      el.textContent = 'Testing...';
-      el.className = 'text-sm text-slate-400';
-      btn.disabled = true;
-      await saveSettings();
-      try {
-        const res = await fetch('/api/tts/test-voice', {method: 'POST'});
-        const data = await res.json();
-        if (data.success) {
-          el.textContent = '✅ ' + data.message;
-          el.className = 'text-sm text-green-400';
-        } else {
-          el.textContent = '❌ ' + data.error;
-          el.className = 'text-sm text-red-400';
-        }
-      } catch(e) {
-        el.textContent = '❌ Request failed: ' + e.message;
-        el.className = 'text-sm text-red-400';
-      } finally {
-        btn.disabled = false;
-      }
     }
 
     // Load settings from API
