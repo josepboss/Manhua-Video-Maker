@@ -166,48 +166,21 @@ def generate_panel_narration(
             return "", 0
 
 
-def align_story_to_panels(story: str, panel_narrations: List[str]) -> List[str]:
-    n = len(panel_narrations)
-    if n == 0:
-        return []
-    if n == 1:
-        return [story.strip()]
-
-    sentences = re.split(r'(?<=[.!?،؟])\s+', story.strip())
-    sentences = [s.strip() for s in sentences if s.strip()]
-
-    if not sentences:
-        return list(panel_narrations)
-
-    if len(sentences) <= n:
-        result = []
-        for i in range(n):
-            result.append(sentences[i] if i < len(sentences) else panel_narrations[i])
-        return result
-
-    weights = [max(len(p.split()), 1) for p in panel_narrations]
-    total_weight = sum(weights)
-    total_sents = len(sentences)
-
-    counts = []
-    remaining = total_sents
-    for i in range(n):
-        if i == n - 1:
-            counts.append(max(remaining, 1))
+def smooth_panel_transitions(panel_narrations: List[str]) -> List[str]:
+    smoothed = []
+    for i, text in enumerate(panel_narrations):
+        if i == 0:
+            smoothed.append(text)
         else:
-            cnt = max(1, round(weights[i] / total_weight * total_sents))
-            max_cnt = remaining - (n - 1 - i)
-            cnt = min(cnt, max_cnt)
-            counts.append(cnt)
-            remaining -= cnt
+            prev = panel_narrations[i - 1]
+            combined = f"{prev.rstrip('.')}... {text}"
+            smoothed.append(combined)
+    return smoothed
 
-    panel_texts = []
-    idx = 0
-    for i, cnt in enumerate(counts):
-        chunk = " ".join(sentences[idx:idx + cnt]).strip()
-        panel_texts.append(chunk if chunk else panel_narrations[i])
-        idx += cnt
 
+def align_story_to_panels(story: str, panel_narrations: List[str]) -> List[str]:
+    panel_texts = panel_narrations.copy()
+    panel_texts = smooth_panel_transitions(panel_texts)
     return panel_texts
 
 
