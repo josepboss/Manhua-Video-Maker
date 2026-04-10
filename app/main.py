@@ -413,7 +413,7 @@ def _run_pipeline_sync(job_id: str):
     def script_progress(pct: int, step: str):
         progress(40 + pct, step)
 
-    final_script, srt_content, llm_stats = script_mod.generate_script(
+    final_script, narrated_panels, panel_narrations, srt_content, llm_stats = script_mod.generate_script(
         panel_data,
         openrouter_key,
         openrouter_model,
@@ -433,12 +433,15 @@ def _run_pipeline_sync(job_id: str):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    # ── Stage 4: TTS ──────────────────────────────────────────────────────────
-    progress(80, "Generating audio narration...")
+    # ── Stage 4: Semantic alignment + per-panel TTS ───────────────────────────
+    progress(80, "Generating per-panel audio narration...")
+
+    panel_texts = script_mod.align_story_to_panels(final_script, panel_narrations)
+    logger.info(f"Aligned story into {len(panel_texts)} panel chunks")
 
     audio_out_dir = str(AUDIO_DIR / job_id)
-    audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
-        final_script, job_id, settings, audio_out_dir
+    panel_audios, audio_path, tts_chars, tts_cost = tts_mod.generate_audio_per_panel(
+        panel_texts, job_id, settings, audio_out_dir
     )
 
     update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
@@ -462,11 +465,12 @@ def _run_pipeline_sync(job_id: str):
         progress(85 + int(pct * 0.14), step)
 
     video_mod.create_video(
-        panel_data,
+        narrated_panels,
         audio_path,
         video_output,
         job_id,
         settings,
+        panel_audios=panel_audios,
         progress_callback=video_progress,
         process_registry=ffmpeg_processes
     )
