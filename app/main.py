@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings, save_settings
 from app import scraper as scraper_mod
+from app import memory as memory_mod
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -154,7 +155,17 @@ async def api_process(job_id: str, background_tasks: BackgroundTasks, body: dict
     if job["status"] not in ["queued", "failed"]:
         raise HTTPException(status_code=400, detail="Job already processing or complete")
     story_context = (body or {}).get("story_context", "")
-    update_job(job_id, status="processing", progress=5, current_step="Starting pipeline...", story_context=story_context)
+    manga_title = (body or {}).get("manga_title", "")
+    chapter_number = int((body or {}).get("chapter_number", 1) or 1)
+    update_job(
+        job_id,
+        status="processing",
+        progress=5,
+        current_step="Starting pipeline...",
+        story_context=story_context,
+        manga_title=manga_title,
+        chapter_number=chapter_number
+    )
     background_tasks.add_task(run_pipeline, job_id)
     return {"job_id": job_id, "status": "processing"}
 
@@ -269,6 +280,39 @@ async def cancel_job(job_id: str):
     return {"success": True}
 
 
+@app.get("/api/memory")
+async def list_all_memory():
+    memories = []
+    if os.path.exists("app/memory"):
+        for f in os.listdir("app/memory"):
+            if f.endswith(".json"):
+                title = f.replace(".json", "").replace("_", " ")
+                mem = memory_mod.load_memory(title)
+                chapters = mem.get("chapters", {})
+                memories.append({"title": title, "chapters_count": len(chapters)})
+    return {"memories": memories}
+
+
+@app.get("/api/memory/{manga_title}")
+async def get_manga_memory(manga_title: str):
+    mem = memory_mod.load_memory(manga_title)
+    chapters = mem.get("chapters", {})
+    return {
+        "manga_title": manga_title,
+        "chapters_count": len(chapters),
+        "latest_chapter": max([int(k) for k in chapters.keys()], default=0),
+        "chapters": chapters
+    }
+
+
+@app.delete("/api/memory/{manga_title}")
+async def delete_manga_memory(manga_title: str):
+    path = memory_mod.get_memory_path(manga_title)
+    if os.path.exists(path):
+        os.remove(path)
+    return {"success": True}
+
+
 @app.get("/api/jobs")
 async def api_list_jobs():
     jobs = []
@@ -361,6 +405,8 @@ def _run_pipeline_sync(job_id: str):
     openrouter_model = settings.get("openrouter_model", "openai/gpt-4o-mini")
 
     story_context = job.get("story_context", "")
+    manga_title = job.get("manga_title", "")
+    chapter_number = int(job.get("chapter_number", 1) or 1)
 
     def script_progress(pct: int, step: str):
         progress(40 + pct, step)
@@ -372,6 +418,8 @@ def _run_pipeline_sync(job_id: str):
         narration_language=narration_lang,
         ocr_lang=ocr_lang,
         story_context=story_context,
+        manga_title=manga_title,
+        chapter_number=chapter_number,
         progress_callback=script_progress
     )
 
