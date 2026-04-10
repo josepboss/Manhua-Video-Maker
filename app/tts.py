@@ -1,10 +1,13 @@
 import re
+import time
 import subprocess
 import logging
 import requests
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+_azure_token_cache: dict = {"token": None, "expires_at": 0.0}
 
 
 def split_text(text: str, max_chars: int = 4500) -> list:
@@ -29,6 +32,61 @@ def get_azure_voice(settings: dict) -> str:
     return settings.get("azure_voice_name", "en-US-AndrewNeural")
 
 
+def _get_azure_token(api_key: str, region: str) -> str:
+    now = time.time()
+    if _azure_token_cache["token"] and now < _azure_token_cache["expires_at"]:
+        logger.info("Azure TTS: reusing cached token")
+        return _azure_token_cache["token"]
+
+    token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+    resp = requests.post(
+        token_url,
+        headers={"Ocp-Apim-Subscription-Key": api_key},
+        timeout=10
+    )
+    resp.raise_for_status()
+    _azure_token_cache["token"] = resp.text
+    _azure_token_cache["expires_at"] = now + 540
+    logger.info("Azure TTS: fetched new token (valid ~9 min)")
+    return _azure_token_cache["token"]
+
+
+def _call_tts(provider: str, text: str, settings: dict) -> bytes:
+    if provider == "elevenlabs":
+        return generate_elevenlabs_tts(
+            text,
+            settings.get("elevenlabs_api_key", ""),
+            settings.get("elevenlabs_voice_id", "")
+        )
+    elif provider == "azure":
+        return generate_azure_tts(
+            text,
+            settings.get("azure_tts_key", ""),
+            settings.get("azure_tts_region", ""),
+            get_azure_voice(settings)
+        )
+    else:
+        return generate_openai_tts(
+            text,
+            settings.get("openai_tts_key", ""),
+            settings.get("openai_tts_voice", "onyx")
+        )
+
+
+def _tts_with_retry(provider: str, text: str, settings: dict, retries: int = 5) -> bytes:
+    for attempt in range(retries):
+        try:
+            return _call_tts(provider, text, settings)
+        except Exception as e:
+            if "429" in str(e):
+                wait = 2 ** attempt
+                logger.warning(f"Azure TTS rate limited, retrying in {wait}s (attempt {attempt + 1}/{retries})...")
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError(f"TTS failed after {retries} retries")
+
+
 def generate_audio_per_panel(
     panel_texts: list,
     job_id: str,
@@ -46,32 +104,21 @@ def generate_audio_per_panel(
 
         panel_path = str(Path(audio_dir) / f"panel_{i:04d}.mp3")
 
-        if provider == "elevenlabs":
-            audio_bytes = generate_elevenlabs_tts(
-                text,
-                settings.get("elevenlabs_api_key", ""),
-                settings.get("elevenlabs_voice_id", "")
-            )
-        elif provider == "azure":
-            audio_bytes = generate_azure_tts(
-                text,
-                settings.get("azure_tts_key", ""),
-                settings.get("azure_tts_region", ""),
-                get_azure_voice(settings)
-            )
-        else:
-            audio_bytes = generate_openai_tts(
-                text,
-                settings.get("openai_tts_key", ""),
-                settings.get("openai_tts_voice", "onyx")
-            )
+        try:
+            audio_bytes = _tts_with_retry(provider, text, settings)
+            with open(panel_path, "wb") as f:
+                f.write(audio_bytes)
+            panel_audio_paths.append(panel_path)
+            total_chars += len(text)
+            logger.info(f"Panel TTS {i+1}/{len(panel_texts)} done ({len(text)} chars)")
+        except Exception as e:
+            logger.warning(f"Panel TTS {i+1}/{len(panel_texts)} failed after retries, skipping: {e}")
+            continue
 
-        with open(panel_path, "wb") as f:
-            f.write(audio_bytes)
+        time.sleep(0.7)
 
-        panel_audio_paths.append(panel_path)
-        total_chars += len(text)
-        logger.info(f"Panel TTS {i+1}/{len(panel_texts)} done ({len(text)} chars)")
+    if not panel_audio_paths:
+        raise RuntimeError("All panel TTS calls failed — no audio generated")
 
     concat_path = str(Path(audio_dir) / "narration.mp3")
     list_path = str(Path(audio_dir) / "concat_list.txt")
@@ -191,14 +238,7 @@ def generate_azure_tts(
     if not api_key or not region:
         raise ValueError("Azure TTS key and region are required")
 
-    token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
-    token_resp = requests.post(
-        token_url,
-        headers={"Ocp-Apim-Subscription-Key": api_key},
-        timeout=10
-    )
-    token_resp.raise_for_status()
-    token = token_resp.text
+    token = _get_azure_token(api_key, region)
 
     chunks = split_text(text, max_chars=4500)
     logger.info(f"Azure TTS: splitting into {len(chunks)} chunk(s)")
