@@ -6,29 +6,6 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def add_arabic_tashkeel(text: str) -> str:
-    try:
-        from camel_tools.morphology.database import MorphologyDB
-        from camel_tools.morphology.analyzer import Analyzer
-
-        db = MorphologyDB.builtin_db()
-        analyzer = Analyzer(db)
-
-        words = text.split()
-        result = []
-        for word in words:
-            analyses = analyzer.analyze(word)
-            if analyses:
-                diac = analyses[0].get('diac', word)
-                result.append(diac)
-            else:
-                result.append(word)
-        return ' '.join(result)
-    except Exception as e:
-        logger.warning(f"Tashkeel failed: {e} — using original text")
-        return text
-
-
 def split_text(text: str, max_chars: int = 4500) -> list:
     sentences = re.split(r'(?<=[.،؟!])\s+', text)
     chunks, current = [], ""
@@ -135,10 +112,6 @@ def generate_azure_tts(
 ) -> bytes:
     if not api_key or not region:
         raise ValueError("Azure TTS key and region are required")
-
-    if 'ar-' in voice_name:
-        logger.info("Applying Arabic tashkeel before TTS")
-        text = add_arabic_tashkeel(text)
 
     token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
     token_resp = requests.post(
