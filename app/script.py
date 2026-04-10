@@ -166,24 +166,6 @@ def generate_panel_narration(
             return "", 0
 
 
-def smooth_panel_transitions(panel_narrations: List[str]) -> List[str]:
-    smoothed = []
-    for i, text in enumerate(panel_narrations):
-        if i == 0:
-            smoothed.append(text)
-        else:
-            prev = panel_narrations[i - 1]
-            combined = f"{prev.rstrip('.')}... {text}"
-            smoothed.append(combined)
-    return smoothed
-
-
-def align_story_to_panels(story: str, panel_narrations: List[str]) -> List[str]:
-    panel_texts = panel_narrations.copy()
-    panel_texts = smooth_panel_transitions(panel_texts)
-    return panel_texts
-
-
 def generate_script(
     panels: List[Tuple[str, str]],
     api_key: str,
@@ -194,10 +176,9 @@ def generate_script(
     manga_title: str = "",
     chapter_number: int = 1,
     progress_callback=None
-) -> Tuple[str, list, list, str, dict]:
+) -> Tuple[str, str, dict]:
     context.reset_context()
     narrations = []
-    narrated_panels = []
     total_tokens = 0
     total_panels = len(panels)
 
@@ -258,7 +239,6 @@ def generate_script(
         if narration:
             context.update_context(narration[:300])
             narrations.append(narration)
-            narrated_panels.append((image_path, text))
 
         if progress_callback:
             pct = int((i + 1) / total_panels * 40)
@@ -292,7 +272,7 @@ def generate_script(
         "estimated_llm_cost": estimated_llm_cost
     }
 
-    return final_script, narrated_panels, narrations, srt_content, stats
+    return final_script, srt_content, stats
 
 
 def generate_srt(script: str) -> str:
