@@ -6,6 +6,19 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def add_arabic_tashkeel(text: str) -> str:
+    try:
+        from camel_tools.tagger.default import DefaultTagger
+
+        tagger = DefaultTagger.pretrained('calima-msa-r13')
+        result = tagger.tag(text.split())
+        diacritized = ' '.join([t.get('diac', w) for t, w in zip(result, text.split())])
+        return diacritized
+    except Exception as e:
+        logger.warning(f"Tashkeel failed: {e} — using original text")
+        return text
+
+
 def split_text(text: str, max_chars: int = 4500) -> list:
     sentences = re.split(r'(?<=[.،؟!])\s+', text)
     chunks, current = [], ""
@@ -112,6 +125,10 @@ def generate_azure_tts(
 ) -> bytes:
     if not api_key or not region:
         raise ValueError("Azure TTS key and region are required")
+
+    if 'ar-' in voice_name:
+        logger.info("Applying Arabic tashkeel before TTS")
+        text = add_arabic_tashkeel(text)
 
     token_url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
     token_resp = requests.post(
