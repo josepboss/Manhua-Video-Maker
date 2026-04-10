@@ -294,6 +294,18 @@ async def cancel_job(job_id: str):
     return {"success": True}
 
 
+@app.post("/api/retry/{job_id}")
+async def api_retry(job_id: str, background_tasks: BackgroundTasks):
+    job = read_job(job_id)
+    if job["status"] not in ["failed", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Job is not in a failed or cancelled state")
+    cancelled_jobs.discard(job_id)
+    update_job(job_id, status="processing", progress=5,
+               current_step="Retrying from last checkpoint...", error_message=None)
+    background_tasks.add_task(run_pipeline, job_id)
+    return {"job_id": job_id, "status": "processing"}
+
+
 @app.get("/api/memory")
 async def list_all_memory():
     memories = []
@@ -351,6 +363,8 @@ async def run_pipeline(job_id: str):
 
 
 def _run_pipeline_sync(job_id: str):
+    os.setpgrp()
+
     from app import panels as panels_mod
     from app import ocr as ocr_mod
     from app import script as script_mod
@@ -364,96 +378,111 @@ def _run_pipeline_sync(job_id: str):
     def progress(pct: int, step: str):
         update_job(job_id, progress=pct, current_step=step)
 
-    # ── Stage 1: Panel detection ──────────────────────────────────────────────
-    progress(10, "Detecting panels...")
-
     def natural_sort_key(path):
         return [int(c) if c.isdigit() else c.lower() for c in re.split(r"(\d+)", os.path.basename(path))]
 
-    image_paths = []
-    for path in upload_paths:
-        if path.lower().endswith(".pdf"):
-            pdf_upload_dir = str(UPLOADS_DIR / job_id)
-            imgs = panels_mod.convert_pdf_to_images(path, pdf_upload_dir)
-            image_paths.extend(imgs)
-        else:
-            image_paths.append(path)
+    ocr_lang = settings.get("ocr_language", "en")
+    narration_lang = settings.get("narration_language", "English")
 
-    image_paths.sort(key=natural_sort_key)
-
-    panels_out_dir = str(PANELS_DIR / job_id)
-    panel_paths = panels_mod.process_images_to_panels(image_paths, panels_out_dir, job_id)
-
-    update_job_stats(job_id, panels_count=len(panel_paths))
-    progress(25, f"Detected {len(panel_paths)} panels. Extracting text...")
+    # ── Stage 1: Panel detection ──────────────────────────────────────────────
+    if "panel_paths" not in job:
+        progress(10, "Detecting panels...")
+        image_paths = []
+        for path in upload_paths:
+            if path.lower().endswith(".pdf"):
+                pdf_upload_dir = str(UPLOADS_DIR / job_id)
+                imgs = panels_mod.convert_pdf_to_images(path, pdf_upload_dir)
+                image_paths.extend(imgs)
+            else:
+                image_paths.append(path)
+        image_paths.sort(key=natural_sort_key)
+        panels_out_dir = str(PANELS_DIR / job_id)
+        panel_paths = panels_mod.process_images_to_panels(image_paths, panels_out_dir, job_id)
+        update_job_stats(job_id, panels_count=len(panel_paths))
+        update_job(job_id, panel_paths=panel_paths)
+        progress(25, f"Detected {len(panel_paths)} panels. Extracting text...")
+    else:
+        panel_paths = job["panel_paths"]
+        progress(25, f"Resuming — {len(panel_paths)} panels already detected")
 
     if is_cancelled(job_id):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    ocr_lang = settings.get("ocr_language", "en")
-    narration_lang = settings.get("narration_language", "English")
-
     # ── Stage 2: OCR ─────────────────────────────────────────────────────────
-    panel_data = []
-    for i, panel_path in enumerate(panel_paths):
-        text = ocr_mod.extract_text(panel_path, lang=ocr_lang)
-        if not text:
-            logger.info(f"Panel {i} returned empty OCR, skipping in narration")
-        panel_data.append((panel_path, text))
-        if i % 5 == 0:
-            pct = 25 + int((i / len(panel_paths)) * 15)
-            progress(pct, f"OCR: {i+1}/{len(panel_paths)} panels...")
+    if "ocr_results" not in job:
+        panel_data = []
+        for i, panel_path in enumerate(panel_paths):
+            text = ocr_mod.extract_text(panel_path, lang=ocr_lang)
+            if not text:
+                logger.info(f"Panel {i} returned empty OCR, skipping in narration")
+            panel_data.append((panel_path, text))
+            if i % 5 == 0:
+                pct = 25 + int((i / len(panel_paths)) * 15)
+                progress(pct, f"OCR: {i+1}/{len(panel_paths)} panels...")
+        ocr_results = [{"path": p, "text": t or ""} for p, t in panel_data]
+        update_job(job_id, ocr_results=ocr_results)
+    else:
+        panel_data = [(r["path"], r["text"]) for r in job["ocr_results"]]
+        progress(40, f"Resuming — OCR already done ({len(panel_data)} panels)")
 
     if is_cancelled(job_id):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
     # ── Stage 3: Script generation ────────────────────────────────────────────
-    progress(40, "Writing narration script...")
+    if "final_script" not in job:
+        progress(40, "Writing narration script...")
+        openrouter_key = settings.get("openrouter_api_key", "")
+        if not openrouter_key:
+            raise ValueError("OpenRouter API key not configured in Settings")
+        openrouter_model = settings.get("openrouter_model", "openai/gpt-4o-mini")
+        story_context = job.get("story_context", "")
+        manga_title = job.get("manga_title", "")
+        chapter_number = int(job.get("chapter_number", 1) or 1)
 
-    openrouter_key = settings.get("openrouter_api_key", "")
-    if not openrouter_key:
-        raise ValueError("OpenRouter API key not configured in Settings")
+        def script_progress(pct: int, step: str):
+            progress(40 + pct, step)
 
-    openrouter_model = settings.get("openrouter_model", "openai/gpt-4o-mini")
-
-    story_context = job.get("story_context", "")
-    manga_title = job.get("manga_title", "")
-    chapter_number = int(job.get("chapter_number", 1) or 1)
-
-    def script_progress(pct: int, step: str):
-        progress(40 + pct, step)
-
-    final_script, srt_content, llm_stats = script_mod.generate_script(
-        panel_data,
-        openrouter_key,
-        openrouter_model,
-        narration_language=narration_lang,
-        ocr_lang=ocr_lang,
-        story_context=story_context,
-        manga_title=manga_title,
-        chapter_number=chapter_number,
-        progress_callback=script_progress
-    )
-
-    total_tokens = llm_stats.get("tokens_used", 0)
-    llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
-    update_job_stats(job_id, tokens_used=total_tokens, llm_cost=llm_cost)
+        final_script, srt_content, llm_stats = script_mod.generate_script(
+            panel_data,
+            openrouter_key,
+            openrouter_model,
+            narration_language=narration_lang,
+            ocr_lang=ocr_lang,
+            story_context=story_context,
+            manga_title=manga_title,
+            chapter_number=chapter_number,
+            progress_callback=script_progress
+        )
+        total_tokens = llm_stats.get("tokens_used", 0)
+        llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
+        update_job_stats(job_id, tokens_used=total_tokens, llm_cost=llm_cost)
+        update_job(job_id, final_script=final_script, srt_content=srt_content, llm_stats=llm_stats)
+    else:
+        final_script = job["final_script"]
+        srt_content = job.get("srt_content", "")
+        llm_stats = job.get("llm_stats", {})
+        total_tokens = llm_stats.get("tokens_used", 0)
+        llm_cost = round(total_tokens / 1_000_000 * 0.15, 6)
+        progress(80, "Resuming — script already generated")
 
     if is_cancelled(job_id):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
     # ── Stage 4: TTS ──────────────────────────────────────────────────────────
-    progress(80, "Generating audio narration...")
-
-    audio_out_dir = str(AUDIO_DIR / job_id)
-    audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
-        final_script, job_id, settings, audio_out_dir
-    )
-
-    update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
+    if "audio_path" not in job:
+        progress(80, "Generating audio narration...")
+        audio_out_dir = str(AUDIO_DIR / job_id)
+        audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
+            final_script, job_id, settings, audio_out_dir
+        )
+        update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
+        update_job(job_id, audio_path=audio_path)
+    else:
+        audio_path = job["audio_path"]
+        progress(85, "Resuming — audio already generated")
 
     if is_cancelled(job_id):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
@@ -461,7 +490,6 @@ def _run_pipeline_sync(job_id: str):
 
     # ── Stage 5: Video assembly ───────────────────────────────────────────────
     progress(85, "Assembling video...")
-
     output_out_dir = OUTPUT_DIR / job_id
     output_out_dir.mkdir(parents=True, exist_ok=True)
     video_output = str(output_out_dir / "final.mp4")
