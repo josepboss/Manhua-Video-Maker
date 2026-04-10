@@ -433,15 +433,12 @@ def _run_pipeline_sync(job_id: str):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    # ── Stage 4: Semantic alignment + per-panel TTS ───────────────────────────
-    progress(80, "Generating per-panel audio narration...")
-
-    panel_texts = script_mod.align_story_to_panels(final_script, panel_narrations)
-    logger.info(f"Aligned story into {len(panel_texts)} panel chunks")
+    # ── Stage 4: Single TTS for full narration ────────────────────────────────
+    progress(80, "Generating audio narration...")
 
     audio_out_dir = str(AUDIO_DIR / job_id)
-    panel_audios, audio_path, tts_chars, tts_cost = tts_mod.generate_audio_per_panel(
-        panel_texts, job_id, settings, audio_out_dir
+    audio_path, tts_chars, tts_cost = tts_mod.generate_audio(
+        final_script, job_id, settings, audio_out_dir
     )
 
     update_job_stats(job_id, tts_chars=tts_chars, tts_cost=tts_cost)
@@ -450,7 +447,25 @@ def _run_pipeline_sync(job_id: str):
         update_job(job_id, status="cancelled", current_step="Cancelled by user")
         return
 
-    # ── Stage 5: Video assembly ───────────────────────────────────────────────
+    # ── Stage 5: Compute panel durations from word-count weights ──────────────
+    panel_texts = script_mod.align_story_to_panels(final_script, panel_narrations)
+    word_counts = [max(len(t.split()), 1) for t in panel_texts]
+    total_words = sum(word_counts)
+    total_duration = video_mod.get_audio_duration(audio_path)
+    if total_duration <= 0:
+        total_duration = 300.0
+
+    panel_durations = [
+        max((wc / total_words) * total_duration + 0.1, 1.5)
+        for wc in word_counts
+    ]
+    logger.info(
+        f"Panel durations: {len(panel_durations)} panels, "
+        f"total audio {total_duration:.1f}s, "
+        f"range {min(panel_durations):.1f}s–{max(panel_durations):.1f}s"
+    )
+
+    # ── Stage 6: Video assembly ───────────────────────────────────────────────
     progress(85, "Assembling video...")
 
     output_out_dir = OUTPUT_DIR / job_id
@@ -470,7 +485,7 @@ def _run_pipeline_sync(job_id: str):
         video_output,
         job_id,
         settings,
-        panel_audios=panel_audios,
+        panel_durations=panel_durations,
         progress_callback=video_progress,
         process_registry=ffmpeg_processes
     )
