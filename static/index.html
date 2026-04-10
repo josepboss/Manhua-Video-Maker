@@ -509,10 +509,11 @@
       document.getElementById('tts-azure').classList.toggle('hidden', provider !== 'azure');
     }
 
-    // Load settings from API
-    async function loadSettings() {
+    // Load settings from API — retries 3× to survive server restart timing
+    async function loadSettings(attempt = 1) {
       try {
-        const res = await fetch('/api/settings');
+        const res = await fetch('/api/settings', {cache: 'no-store'});
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const s = await res.json();
         document.getElementById('openrouter_api_key').value = s.openrouter_api_key || '';
         const modelSel = document.getElementById('openrouter_model');
@@ -539,7 +540,15 @@
         const videoRadio = document.querySelector(`input[name="video_format"][value="${videoFormat}"]`);
         if (videoRadio) videoRadio.checked = true;
       } catch(e) {
-        console.error('Failed to load settings:', e);
+        if (attempt < 3) {
+          console.warn(`Settings load attempt ${attempt} failed, retrying in 1.5s…`, e.message);
+          setTimeout(() => loadSettings(attempt + 1), 1500);
+        } else {
+          console.error('Failed to load settings after 3 attempts:', e);
+          const err = document.getElementById('save-err');
+          err.textContent = 'Could not connect to server — try refreshing the page';
+          err.classList.remove('hidden');
+        }
       }
     }
 
@@ -572,7 +581,9 @@
           msg.classList.remove('hidden');
           setTimeout(() => msg.classList.add('hidden'), 2500);
         } else {
-          throw new Error('Failed to save');
+          let detail = `HTTP ${res.status}`;
+          try { const d = await res.json(); detail += ': ' + (d.detail || JSON.stringify(d)); } catch(_) {}
+          throw new Error(detail);
         }
       } catch(e) {
         const err = document.getElementById('save-err');
