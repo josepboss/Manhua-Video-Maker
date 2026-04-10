@@ -96,6 +96,7 @@
       <button onclick="switchTab('generate')" id="tab-generate" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Generate</button>
       <button onclick="switchTab('history')" id="tab-history" class="tab-inactive pb-3 text-sm font-semibold transition-colors">History</button>
       <button onclick="switchTab('scraper')" id="tab-scraper" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Scraper</button>
+      <button onclick="switchTab('memory')" id="tab-memory" class="tab-inactive pb-3 text-sm font-semibold transition-colors">Memory</button>
     </div>
 
     <!-- Settings Tab -->
@@ -255,6 +256,22 @@
         <button onclick="document.getElementById('scraped-banner').classList.add('hidden')" class="text-slate-500 hover:text-slate-300 text-xs">Dismiss</button>
       </div>
       <div class="card p-6 space-y-4">
+        <h2 class="text-base font-semibold text-white">Manga Memory</h2>
+        <p class="text-sm text-slate-400">Link chapters together so the narration stays consistent across episodes.</p>
+        <div class="flex gap-3">
+          <div style="flex:2">
+            <label class="label">Manga Title</label>
+            <input type="text" id="manga_title" placeholder="e.g. Soul Land / كيم سو-هو" class="input-field" />
+          </div>
+          <div style="flex:1">
+            <label class="label">Chapter Number</label>
+            <input type="number" id="chapter_number" value="1" min="1" class="input-field" />
+          </div>
+        </div>
+        <div id="memory-status" class="text-sm hidden"></div>
+      </div>
+
+      <div class="card p-6 space-y-4">
         <div>
           <label class="label" for="story_context">Story Context <span class="text-slate-500 font-normal">(optional but recommended)</span></label>
           <textarea id="story_context" rows="4" class="input-field resize-none" placeholder="Example: This is chapter 5 of 'Soul Land'. The main character is Tang San, a genius martial artist. Other characters: Xiao Wu (his partner), Grandmaster (his teacher). Tang San just awakened his second spirit ring..."></textarea>
@@ -386,6 +403,17 @@
       </div>
     </div>
 
+    <!-- Memory Tab -->
+    <div id="panel-memory" class="hidden space-y-6">
+      <div class="card p-6 space-y-5">
+        <h2 class="text-base font-semibold text-white">Manga Memory</h2>
+        <p class="text-sm text-slate-400 mb-4">Saved chapter summaries used to maintain continuity across chapters. These are automatically built after each chapter is processed.</p>
+        <div id="memory-list">
+          <p class="text-slate-500 text-sm">Loading...</p>
+        </div>
+      </div>
+    </div>
+
     <!-- Scraper Tab -->
     <div id="panel-scraper" class="hidden space-y-6">
       <div class="card p-6 space-y-5">
@@ -443,6 +471,7 @@
       document.getElementById('tab-' + tab).className = 'tab-active pb-3 text-sm font-semibold transition-colors';
       currentTab = tab;
       if (tab === 'history') renderHistory();
+      if (tab === 'memory') loadMemoryTab();
     }
 
     // Vision-capable model badge
@@ -622,10 +651,12 @@
 
         // Start processing
         const storyContext = document.getElementById('story_context').value.trim();
+        const mangaTitle = document.getElementById('manga_title').value.trim();
+        const chapterNumber = parseInt(document.getElementById('chapter_number').value) || 1;
         const processRes = await fetch(`/api/process/${job_id}`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ story_context: storyContext })
+          body: JSON.stringify({ story_context: storyContext, manga_title: mangaTitle, chapter_number: chapterNumber })
         });
         if (!processRes.ok) throw new Error('Failed to start processing: ' + await processRes.text());
 
@@ -901,6 +932,8 @@
       currentJobId = jobId;
 
       const storyContext = document.getElementById('story_context').value;
+      const mangaTitle = document.getElementById('manga_title').value.trim();
+      const chapterNumber = parseInt(document.getElementById('chapter_number').value) || 1;
       document.getElementById('scraped-banner').classList.remove('hidden');
       document.getElementById('scraper-status-generate').textContent =
         'Scraped chapter loaded — starting pipeline...';
@@ -918,7 +951,7 @@
         const res = await fetch(`/api/process/${jobId}`, {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({story_context: storyContext})
+          body: JSON.stringify({story_context: storyContext, manga_title: mangaTitle, chapter_number: chapterNumber})
         });
         if (!res.ok) throw new Error(await res.text());
         startPolling(jobId);
@@ -986,6 +1019,58 @@
         body: JSON.stringify({...settings, known_scraper_sites: sites})
       });
       loadScraperSites();
+    }
+
+    // Memory
+    document.getElementById('manga_title').addEventListener('blur', async function() {
+      const title = this.value.trim();
+      const chapter = parseInt(document.getElementById('chapter_number').value) || 1;
+      if (!title) return;
+      try {
+        const res = await fetch(`/api/memory/${encodeURIComponent(title)}`);
+        const data = await res.json();
+        const statusEl = document.getElementById('memory-status');
+        statusEl.classList.remove('hidden');
+        if (data.chapters_count > 0) {
+          statusEl.className = 'text-sm text-green-400';
+          statusEl.textContent =
+            `✅ Found memory: ${data.chapters_count} previous chapter${data.chapters_count !== 1 ? 's' : ''} saved (latest: chapter ${data.latest_chapter})`;
+        } else {
+          statusEl.className = 'text-sm text-slate-500';
+          statusEl.textContent = '🆕 New manga — memory will be created after the first chapter is processed';
+        }
+      } catch(e) {
+        console.error('Memory lookup failed:', e);
+      }
+    });
+
+    async function loadMemoryTab() {
+      const container = document.getElementById('memory-list');
+      try {
+        const res = await fetch('/api/memory');
+        const data = await res.json();
+        if (!data.memories.length) {
+          container.innerHTML = "<p class='text-slate-500 text-sm'>No manga memories saved yet. Process a chapter with a Manga Title set to start building memory.</p>";
+          return;
+        }
+        container.innerHTML = data.memories.map(m => `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:12px; background:#0f0f13; border-radius:8px; margin-bottom:8px; border:1px solid #2d2d3d;">
+            <div>
+              <span class="font-medium text-slate-200">${m.title}</span>
+              <span class="text-sm text-slate-500 ml-2">${m.chapters_count} chapter${m.chapters_count !== 1 ? 's' : ''} saved</span>
+            </div>
+            <button onclick="deleteMemory('${m.title.replace(/'/g, "\\'")}')" style="background:#ef4444; color:white; padding:4px 12px; border-radius:4px; font-size:13px; border:none; cursor:pointer;">Delete</button>
+          </div>
+        `).join('');
+      } catch(e) {
+        container.innerHTML = "<p class='text-red-400 text-sm'>Failed to load memories.</p>";
+      }
+    }
+
+    async function deleteMemory(title) {
+      if (!confirm(`Delete all saved memory for "${title}"?`)) return;
+      await fetch(`/api/memory/${encodeURIComponent(title)}`, {method: 'DELETE'});
+      loadMemoryTab();
     }
 
     // Init
