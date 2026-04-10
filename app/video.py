@@ -20,43 +20,63 @@ def get_audio_duration(audio_path: str) -> float:
     return 0.0
 
 
-def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape", on_popen=None) -> None:
+def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape", on_popen=None) -> bool:
     if resolution == "landscape":
-        w, h = "1280", "720"
+        w, h = 1280, 720
     else:
-        w, h = "720", "1280"
+        w, h = 720, 1280
 
-    vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,"
-        f"zoompan=z='1.2-0.2*on/120'"
-        f":x='(iw-iw/zoom)/2'"
-        f":y='(ih-ih/zoom)/2'"
-        f":d=120"
-        f":s={w}x{h}"
-        f":fps=15"
-    )
+    logger.info(f"Starting clip: {panel_path} → {clip_path} ({duration:.2f}s)")
 
     cmd = [
         "ffmpeg", "-y",
         "-loop", "1",
         "-i", panel_path,
-        "-vf", vf,
+        "-vf", (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+            f"zoompan=z='1.2-0.2*on/120'"
+            f":x='(iw-iw/zoom)/2'"
+            f":y='(ih-ih/zoom)/2'"
+            f":d=120:s={w}x{h}:fps=15"
+        ),
         "-t", str(duration),
         "-c:v", "libx264",
         "-preset", "ultrafast",
         "-crf", "30",
-        "-tune", "stillimage",
         "-threads", "1",
+        "-tune", "stillimage",
         "-pix_fmt", "yuv420p",
         clip_path
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if on_popen:
-        on_popen(proc)
-    _, stderr = proc.communicate(timeout=300)
-    if proc.returncode != 0:
-        raise RuntimeError(f"FFmpeg clip failed for {panel_path}: {stderr.decode()[-500:]}")
+
+    logger.info(f"FFmpeg cmd: {' '.join(cmd)}")
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if on_popen:
+            on_popen(proc)
+
+        _, stderr = proc.communicate(timeout=60)
+
+        if proc.returncode != 0:
+            logger.error(f"FFmpeg failed (code {proc.returncode}): {stderr.decode()[-1000:]}")
+            return False
+
+        if not os.path.exists(clip_path):
+            logger.error(f"FFmpeg succeeded but clip not found: {clip_path}")
+            return False
+
+        logger.info(f"Clip done: {clip_path}")
+        return True
+
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        logger.error(f"FFmpeg timeout on {panel_path}")
+        return False
+    except Exception as e:
+        logger.error(f"FFmpeg exception on {panel_path}: {e}")
+        return False
 
 
 def create_video(
@@ -96,6 +116,8 @@ def create_video(
     duration_per_panel = audio_duration / len(selected_panels)
     duration_per_panel = max(duration_per_panel, 2.0)
 
+    logger.info(f"Starting video assembly: {len(selected_panels)} panels, {duration_per_panel:.2f}s each")
+
     if progress_callback:
         progress_callback(0, "Assembling video clips...")
 
@@ -104,17 +126,22 @@ def create_video(
 
     for i, (img_path, _) in enumerate(selected_panels):
         clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
-        clip_paths.append(clip_path)
+        logger.info(f"Processing panel {i+1}/{len(selected_panels)}: {img_path}")
 
-        try:
-            make_panel_clip(img_path, clip_path, duration_per_panel, resolution, on_popen=register)
-        except RuntimeError as e:
-            logger.error(f"Clip {i} failed: {e}")
-            raise
+        success = make_panel_clip(img_path, clip_path, duration_per_panel, resolution, on_popen=register)
+        if not success:
+            logger.warning(f"Skipping failed clip {i+1}/{len(selected_panels)}: {img_path}")
+        else:
+            clip_paths.append(clip_path)
 
         if progress_callback:
             pct = int((i + 1) / len(selected_panels) * 80)
             progress_callback(pct, f"Encoding clip {i+1}/{len(selected_panels)}...")
+
+    if not clip_paths:
+        raise RuntimeError("All panel clips failed — nothing to concatenate")
+
+    logger.info(f"All clips done ({len(clip_paths)}/{len(selected_panels)} succeeded) — starting concat")
 
     with open(concat_list_path, "w") as f:
         for cp in clip_paths:
