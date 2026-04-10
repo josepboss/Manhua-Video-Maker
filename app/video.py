@@ -20,7 +20,7 @@ def get_audio_duration(audio_path: str) -> float:
     return 0.0
 
 
-def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape", on_popen=None) -> bool:
+def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution: str = "landscape") -> bool:
     if resolution == "landscape":
         w, h = 1280, 720
     else:
@@ -53,29 +53,29 @@ def make_panel_clip(panel_path: str, clip_path: str, duration: float, resolution
     logger.info(f"FFmpeg cmd: {' '.join(cmd)}")
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-        if on_popen:
-            on_popen(proc)
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60
+        )
 
-        _, stderr = proc.communicate(timeout=60)
-
-        if proc.returncode != 0:
-            logger.error(f"FFmpeg failed (code {proc.returncode}): {stderr.decode()[-1000:]}")
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed (code {result.returncode}): {result.stderr.decode()[-500:]}")
             return False
 
         if not os.path.exists(clip_path):
-            logger.error(f"FFmpeg succeeded but clip not found: {clip_path}")
+            logger.error(f"Clip not found after FFmpeg: {clip_path}")
             return False
 
         logger.info(f"Clip done: {clip_path}")
         return True
 
     except subprocess.TimeoutExpired:
-        proc.kill()
         logger.error(f"FFmpeg timeout on {panel_path}")
         return False
     except Exception as e:
-        logger.error(f"FFmpeg exception on {panel_path}: {e}")
+        logger.error(f"FFmpeg exception: {e}")
         return False
 
 
@@ -128,7 +128,7 @@ def create_video(
         clip_path = str(Path(output_path).parent / f"clip_{i:04d}.mp4")
         logger.info(f"Processing panel {i+1}/{len(selected_panels)}: {img_path}")
 
-        success = make_panel_clip(img_path, clip_path, duration_per_panel, resolution, on_popen=register)
+        success = make_panel_clip(img_path, clip_path, duration_per_panel, resolution)
         if not success:
             logger.warning(f"Skipping failed clip {i+1}/{len(selected_panels)}: {img_path}")
         else:
